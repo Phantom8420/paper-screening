@@ -191,3 +191,64 @@ def test_latex_compiles(tmp_path, con):
     _, [pid] = ingest(con, [make_bundle(tmp_path / "p")], data)
     assert convert_paper(con, pid, data) == "converted"
     assert con.execute("SELECT page_count FROM paper").fetchone()[0] >= 1
+
+
+# --- regressions from the M1 review ---
+
+def test_bad_zip_does_not_sink_batch(tmp_path, con):
+    z = tmp_path / "corrupt.zip"
+    with zipfile.ZipFile(z, "w", zipfile.ZIP_DEFLATED) as f:
+        f.writestr("main.tex", MAIN_TEX * 200)
+    raw = bytearray(z.read_bytes())
+    raw[60:200] = b"\xff" * 140  # wreck the deflate stream, keep the directory intact
+    z.write_bytes(bytes(raw))
+    _, ids = ingest(con, [z, make_docx(tmp_path / "ok.docx")], tmp_path / "data")
+    rows = {r["external_id"]: (r["status"], r["format"]) for r in con.execute("SELECT * FROM paper")}
+    assert len(ids) == 2
+    assert rows["corrupt.zip"] == ("needs_manual", "unknown")
+    assert rows["ok.docx"] == ("ingested", "word")
+
+
+def test_empty_input_is_recorded(tmp_path, con):
+    (tmp_path / "empty").mkdir()
+    _, [pid] = ingest(con, [tmp_path / "empty"], tmp_path / "data")
+    assert con.execute("SELECT code FROM signal WHERE paper_id=?", (pid,)).fetchone()[0] == "empty_input"
+
+
+def test_word_file_beside_tex_is_its_own_paper(tmp_path):
+    b = make_bundle(tmp_path / "p")
+    make_docx(b / "other.docx")
+    kinds = sorted(u.kind for u in discover(b, tmp_path))
+    assert kinds == ["latex", "word"]
+
+
+def test_include_bomb_is_bounded(tmp_path):
+    b = tmp_path / "p"
+    b.mkdir()
+    (b / "main.tex").write_text(r"\documentclass{article}\begin{document}\input{a}\end{document}")
+    (b / "a.tex").write_text(r"\input{c}" * 30)
+    (b / "c.tex").write_text(r"\input{a}" * 30)
+    s, err = extract_structure(b / "main.tex", "latex", b)
+    assert s is None and "exceeds" in err
+
+
+def test_timeout_kills_grandchildren(monkeypatch):
+    import sys
+    import time
+    from screening import convert
+    monkeypatch.setattr(convert, "TIMEOUT", 2)
+    child = "import subprocess,sys; subprocess.run([sys.executable,'-c','import time; time.sleep(60)'])"
+    t = time.monotonic()
+    ok, out = convert._run([sys.executable, "-c", child])
+    assert not ok and "timed out" in out and time.monotonic() - t < 30
+
+
+@pytest.mark.skipif(not HAS_LATEX, reason="latexmk not installed")
+def test_shipped_latexmkrc_is_not_run(tmp_path, con):
+    data = tmp_path / "data"
+    b = make_bundle(tmp_path / "p")
+    marker = tmp_path / "pwned"
+    (b / "latexmkrc").write_text(f'open(my $f, ">", "{marker.as_posix()}"); close $f;')
+    _, [pid] = ingest(con, [b], data)
+    convert_paper(con, pid, data)
+    assert not marker.exists()

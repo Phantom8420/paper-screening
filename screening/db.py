@@ -6,9 +6,9 @@ from pathlib import Path
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS batch(
-  id INTEGER PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL);
+  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS paper(
-  id INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   batch_id INTEGER NOT NULL REFERENCES batch(id),
   external_id TEXT, title TEXT,
   format TEXT NOT NULL CHECK(format IN ('latex','word','unknown')),

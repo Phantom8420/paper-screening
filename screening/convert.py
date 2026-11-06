@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
 from pathlib import Path
@@ -18,27 +19,56 @@ from .db import add_signal, audit
 from .sniff import sniff
 
 TIMEOUT = 180
+MAX_FLAT_CHARS = 5_000_000
+MAX_INCLUDES = 500
 BLOCKS = {"Para", "Plain", "Header", "CodeBlock", "BlockQuote", "OrderedList", "BulletList",
           "Table", "Div", "LineBlock", "DefinitionList", "Figure"}
 INCLUDE = re.compile(r"\\(?:input|include)\s*\{([^}]+)\}")
 COMMENT = re.compile(r"(?<!\\)%.*")
 
 
+def _kill_tree(p):
+    # timeout must kill grandchildren too (pdflatex, soffice.bin), or communicate() hangs on Windows
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)], capture_output=True)
+    else:
+        os.killpg(p.pid, signal.SIGKILL)
+
+
 def _run(cmd, cwd=None, input_text=None, env=None):
     """Return (ok, output). Never raises for tool failures."""
+    group = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
+             else {"start_new_session": True})
     try:
-        p = subprocess.run(cmd, cwd=cwd, input=input_text, capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=TIMEOUT, env=env)
+        p = subprocess.Popen(cmd, cwd=cwd, env=env, text=True, encoding="utf-8", errors="replace",
+                             stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, **group)
     except FileNotFoundError:
         return False, f"{cmd[0]} is not installed"
+    try:
+        out, err = p.communicate(input_text, timeout=TIMEOUT)
     except subprocess.TimeoutExpired:
+        _kill_tree(p)
+        try:
+            p.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
         return False, f"timed out after {TIMEOUT}s"
-    return p.returncode == 0, p.stdout if p.returncode == 0 else (p.stdout + p.stderr)[-4000:]
+    return p.returncode == 0, out if p.returncode == 0 else (out + err)[-4000:]
 
 
-def flatten_latex(main: Path, root: Path, depth: int = 0) -> str:
+class IncludeLimit(Exception):
+    pass
+
+
+def flatten_latex(main: Path, root: Path, depth: int = 0, budget: dict | None = None) -> str:
     """Inline \\input/\\include, refusing anything outside the bundle (pandoc then runs sandboxed)."""
+    budget = budget if budget is not None else {"chars": MAX_FLAT_CHARS, "files": MAX_INCLUDES}
     text = COMMENT.sub("", main.read_text(encoding="utf-8", errors="replace"))
+    budget["chars"] -= len(text)
+    budget["files"] -= 1
+    if budget["chars"] < 0 or budget["files"] < 0:
+        raise IncludeLimit(f"\\input expansion exceeds {MAX_INCLUDES} files or {MAX_FLAT_CHARS} characters")
     if depth > 10:
         return text
 
@@ -49,7 +79,7 @@ def flatten_latex(main: Path, root: Path, depth: int = 0) -> str:
         target = target.resolve()
         if not target.is_relative_to(root.resolve()) or not target.is_file():
             return ""
-        return flatten_latex(target, root, depth + 1)
+        return flatten_latex(target, root, depth + 1, budget)
 
     return INCLUDE.sub(repl, text)
 
@@ -96,7 +126,11 @@ def extract_structure(path: Path, fmt: str, root: Path):
     """Return (structure, error)."""
     pandoc = pypandoc.get_pandoc_path()
     if fmt == "latex":
-        ok, out = _run([pandoc, "--sandbox", "-f", "latex", "-t", "json"], input_text=flatten_latex(path, root))
+        try:
+            flat = flatten_latex(path, root)
+        except IncludeLimit as e:
+            return None, str(e)
+        ok, out = _run([pandoc, "--sandbox", "-f", "latex", "-t", "json"], input_text=flat)
     else:
         ok, out = _run([pandoc, "--sandbox", "-f", fmt, "-t", "json", str(path)])
     if not ok:
@@ -137,7 +171,11 @@ def compile_latex(root: Path, main: Path, outdir: Path):
         build = Path(tmp) / "src"
         shutil.copytree(root, build)
         cwd = build / rel.parent
-        ok, log = _run(["latexmk", "-pdf", "-interaction=nonstopmode", "-halt-on-error", "-no-shell-escape",
+        for p in list(build.rglob("*")):  # latexmkrc is Perl: a submission must never ship one we run
+            if p.is_file() and (p.name.lower() in ("latexmkrc", ".latexmkrc") or p.suffix == ".fdb_latexmk"):
+                p.unlink()
+        (cwd / f"{rel.stem}.pdf").unlink(missing_ok=True)  # never accept a shipped "prebuilt" PDF
+        ok, log = _run(["latexmk", "-norc", "-pdf", "-interaction=nonstopmode", "-halt-on-error", "-no-shell-escape",
                         "-file-line-error", rel.name], cwd=cwd, env=env)
         pdf = cwd / f"{rel.stem}.pdf"
         if ok and pdf.exists():
@@ -150,7 +188,19 @@ def compile_latex(root: Path, main: Path, outdir: Path):
 
 
 def convert_paper(con, paper_id: int, data_dir) -> str:
-    """Convert one paper; returns its new status."""
+    """Convert one paper; returns its new status. Never raises: a crash becomes a signal."""
+    try:
+        return _convert(con, paper_id, data_dir)
+    except Exception as e:
+        con.rollback()
+        con.execute("UPDATE paper SET status='needs_manual' WHERE id=?", (paper_id,))
+        add_signal(con, paper_id, "conversion", "convert_crashed", "fail",
+                   "Conversion stopped with an unexpected error.", {"error": f"{type(e).__name__}: {e}"})
+        con.commit()
+        return "needs_manual"
+
+
+def _convert(con, paper_id: int, data_dir) -> str:
     data_dir = Path(data_dir)
     row = con.execute("SELECT * FROM paper WHERE id=?", (paper_id,)).fetchone()
     src = data_dir / row["source_dir"]
