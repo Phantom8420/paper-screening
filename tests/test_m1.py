@@ -1,4 +1,3 @@
-import io
 import json
 import shutil
 import sqlite3
@@ -9,7 +8,7 @@ import pytest
 
 from screening import intake
 from screening.convert import convert_paper, extract_structure, flatten_latex
-from screening.db import add_signal, connect
+from screening.db import add_signal, connect, start_run
 from screening.intake import UnsafeArchive, discover, ingest, safe_extract
 from screening.sniff import OLE2, sniff
 
@@ -135,7 +134,7 @@ def test_ingest_never_drops_and_logs(tmp_path, con):
 def test_signals_are_append_only(con):
     con.execute("INSERT INTO batch(name, created_at) VALUES('b','t')")
     con.execute("INSERT INTO paper(batch_id, format, status, created_at) VALUES(1,'word','ingested','t')")
-    add_signal(con, 1, "intake", "x", "warn", "m")
+    add_signal(con, start_run(con, 1, "intake"), "x", "warn", "m")
     with pytest.raises(sqlite3.IntegrityError):
         con.execute("UPDATE signal SET severity='info'")
     with pytest.raises(sqlite3.IntegrityError):
@@ -235,6 +234,7 @@ def test_include_bomb_is_bounded(tmp_path):
 def test_timeout_kills_grandchildren(monkeypatch):
     import sys
     import time
+
     from screening import convert
     monkeypatch.setattr(convert, "TIMEOUT", 2)
     child = "import subprocess,sys; subprocess.run([sys.executable,'-c','import time; time.sleep(60)'])"

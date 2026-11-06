@@ -15,7 +15,7 @@ from pathlib import Path
 import pypandoc
 from pypdf import PdfReader
 
-from .db import add_signal, audit
+from .db import add_signal, audit, start_run
 from .sniff import sniff
 
 TIMEOUT = 180
@@ -114,7 +114,10 @@ def structure_from_ast(doc: dict) -> dict:
             cur["text"] += _text(b)
     if cur["heading"] or cur["text"].strip():
         sections.append(cur)
+    author = meta.get("author")
+    authors = author["c"] if author and author.get("t") == "MetaList" else ([author] if author else [])
     return {
+        "authors": [a for a in (_text(x).strip() for x in authors) if a],
         "title": _text(meta.get("title")).strip() or None,
         "abstract": _text(meta.get("abstract")).strip() or None,
         "keywords": _text(meta.get("keywords")).strip() or None,
@@ -194,7 +197,7 @@ def convert_paper(con, paper_id: int, data_dir) -> str:
     except Exception as e:
         con.rollback()
         con.execute("UPDATE paper SET status='needs_manual' WHERE id=?", (paper_id,))
-        add_signal(con, paper_id, "conversion", "convert_crashed", "fail",
+        add_signal(con, start_run(con, paper_id, "conversion"), "convert_crashed", "fail",
                    "Conversion stopped with an unexpected error.", {"error": f"{type(e).__name__}: {e}"})
         con.commit()
         return "needs_manual"
@@ -254,8 +257,9 @@ def _convert(con, paper_id: int, data_dir) -> str:
         (struct and struct["title"], rel(pdf), rel(text_path), struct and json.dumps(struct), page_count,
          status, paper_id),
     )
+    run_id = start_run(con, paper_id, "conversion")
     for code, severity, message, evidence in problems:
-        add_signal(con, paper_id, "conversion", code, severity, message, evidence)
+        add_signal(con, run_id, code, severity, message, evidence)
     audit(con, "system", "convert", "paper", paper_id, {"status": status, "pages": page_count})
     con.commit()
     return status

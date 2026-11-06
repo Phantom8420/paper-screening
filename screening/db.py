@@ -22,7 +22,11 @@ CREATE TABLE IF NOT EXISTS signal(
   id INTEGER PRIMARY KEY, paper_id INTEGER NOT NULL REFERENCES paper(id),
   check_name TEXT NOT NULL, check_version TEXT NOT NULL, code TEXT NOT NULL,
   severity TEXT NOT NULL CHECK(severity IN ('info','warn','fail')),
-  message TEXT NOT NULL, evidence_json TEXT, score REAL, created_at TEXT NOT NULL);
+  message TEXT NOT NULL, evidence_json TEXT, score REAL, created_at TEXT NOT NULL,
+  run_id INTEGER NOT NULL REFERENCES check_run(id));
+CREATE TABLE IF NOT EXISTS check_run(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, paper_id INTEGER NOT NULL REFERENCES paper(id),
+  check_name TEXT NOT NULL, check_version TEXT NOT NULL, config_json TEXT, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS decision(
   id INTEGER PRIMARY KEY, paper_id INTEGER NOT NULL REFERENCES paper(id),
   actor TEXT NOT NULL,
@@ -42,11 +46,13 @@ CREATE TABLE IF NOT EXISTS audit_log(
   entity TEXT, entity_id INTEGER, payload_json TEXT);
 CREATE INDEX IF NOT EXISTS ix_paper_batch ON paper(batch_id);
 CREATE INDEX IF NOT EXISTS ix_signal_paper ON signal(paper_id);
+CREATE INDEX IF NOT EXISTS ix_signal_run ON signal(run_id);
+CREATE INDEX IF NOT EXISTS ix_run_paper ON check_run(paper_id, check_name);
 CREATE INDEX IF NOT EXISTS ix_decision_paper ON decision(paper_id);
 """ + "".join(
     f"CREATE TRIGGER IF NOT EXISTS {t}_no_{op} BEFORE {op.upper()} ON {t} "
     f"BEGIN SELECT RAISE(ABORT, '{t} is append-only'); END;\n"
-    for t in ("signal", "decision", "audit_log")
+    for t in ("signal", "check_run", "decision", "audit_log")
     for op in ("update", "delete")
 )
 
@@ -72,10 +78,27 @@ def audit(con, actor, action, entity=None, entity_id=None, payload=None):
     )
 
 
-def add_signal(con, paper_id, check, code, severity, message, evidence=None, score=None, version="1"):
+def start_run(con, paper_id, check, version="1", config=None) -> int:
+    """Every signal belongs to a run; re-running a check starts a new run and supersedes the old one."""
+    return con.execute(
+        "INSERT INTO check_run(paper_id, check_name, check_version, config_json, created_at) VALUES(?,?,?,?,?)",
+        (paper_id, check, version, json.dumps(config) if config is not None else None, now()),
+    ).lastrowid
+
+
+def add_signal(con, run_id, code, severity, message, evidence=None, score=None):
+    paper_id, check, version = con.execute(
+        "SELECT paper_id, check_name, check_version FROM check_run WHERE id=?", (run_id,)).fetchone()
     con.execute(
         "INSERT INTO signal(paper_id, check_name, check_version, code, severity, message, evidence_json, score,"
-        " created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-        (paper_id, check, version, code, severity, message, json.dumps(evidence or {}), score, now()),
+        " created_at, run_id) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (paper_id, check, version, code, severity, message, json.dumps(evidence or {}), score, now(), run_id),
     )
     audit(con, "system", "signal", "paper", paper_id, {"check": check, "code": code, "severity": severity})
+
+
+def current_signals(con, paper_id):
+    """Signals from the latest run of each check for this paper."""
+    return con.execute(
+        "SELECT s.* FROM signal s WHERE s.paper_id=? AND s.run_id = (SELECT max(r.id) FROM check_run r"
+        " WHERE r.paper_id=s.paper_id AND r.check_name=s.check_name) ORDER BY s.id", (paper_id,)).fetchall()

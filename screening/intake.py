@@ -7,7 +7,7 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .db import add_signal, audit, now
+from .db import add_signal, audit, now, start_run
 from .sniff import EXT_KIND, sniff
 
 MAX_ENTRIES = 10_000
@@ -210,6 +210,7 @@ def _store_unit(con, u: Unit, batch_id: int, bdir: Path, data_dir: Path) -> int:
     except Exception as e:  # e.g. Windows path-length or reserved names inside a bundle
         con.execute("UPDATE paper SET status='needs_manual' WHERE id=?", (pid,))
         notes.append(("store_failed", "fail", f"Files could not be stored: {e}", {"error": type(e).__name__}))
+    run_id = start_run(con, pid, "intake")
     for code, severity, message, evidence in notes:
-        add_signal(con, pid, "intake", code, severity, message, evidence)
+        add_signal(con, run_id, code, severity, message, evidence)
     return pid
