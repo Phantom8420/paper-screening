@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}{{ p.external_id or "#" ~ p.id }} · Screening{% endblock %}
+{% block crumb %}
+<nav class="crumb"><a href="/">Queue</a><span aria-hidden="true">/</span><strong>{{ p.external_id or "#" ~ p.id }}</strong></nav>
+{% endblock %}
+{% block actions %}
+<a class="btn sm" href="{{ '/paper/%d' % prev if prev else '#' }}" aria-disabled="{{ 'false' if prev else 'true' }}"><kbd>k</kbd> Previous</a>
+<a class="btn sm" href="{{ '/paper/%d' % next if next else '#' }}" aria-disabled="{{ 'false' if next else 'true' }}">Next <kbd>j</kbd></a>
+{% endblock %}
+{% block body %}
+<main class="work">
+  <section class="viewer" aria-label="Paper PDF">
+    {% if has_pdf %}
+    <iframe id="pdf" title="Paper PDF" src="/paper/{{ p.id }}/pdf#view=FitH"></iframe>
+    {% else %}
+    <div class="none"><strong>No PDF to show</strong>This paper has no built PDF, usually because its sources did not compile. The flags on the right still apply.</div>
+    {% endif %}
+  </section>
+
+  <section class="side">
+    <div class="head">
+      <h1>{{ p.title or "Untitled submission" }}</h1>
+      <div class="meta">
+        <span class="tag plain">{{ {"latex": "LaTeX", "word": "Word"}.get(p.format, "Unknown format") }}</span>
+        {% if p.page_count %}<span class="tag plain">{{ p.page_count }} pages</span>{% endif %}
+      </div>
+    </div>
+
+    <div class="verdict {{ tier }}">
+      {% if tier == "ok" %}
+      <div class="n">✓</div><p><strong>No open flags</strong>Ready to send to review.</p>
+      {% else %}
+      <div class="n">{{ open|length }}</div>
+      <p><strong>{{ "%d required fix%s" % (fails, "" if fails == 1 else "es") if fails else "Warnings only" }}</strong>
+        {{ warns }} worth a look{% if dismissed %}, {{ dismissed|length }} dismissed{% endif %}</p>
+      {% endif %}
+    </div>
+
+    <nav class="tabs">
+      <a href="?tab=flags" class="{{ 'on' if tab == 'flags' }}">Flags <span>{{ open|length }}</span></a>
+      <a href="?tab=notice" class="{{ 'on' if tab == 'notice' }}">Notice draft</a>
+      <a href="?tab=history" class="{{ 'on' if tab == 'history' }}">History <span>{{ history|length }}</span></a>
+    </nav>
+
+    <div class="scroll">
+    {% if tab == "notice" %}
+      {% if draft %}
+      <p class="sub">Nothing is sent from here. Copy it, edit it, and send it from your conference system.</p>
+      <div class="draft" id="draft">{{ draft }}</div>
+      <div><button class="btn sm" type="button" onclick="navigator.clipboard.writeText(document.getElementById('draft').innerText).then(() => this.textContent = 'Copied')">Copy notice</button></div>
+      {% else %}
+      <div class="ok-state"><strong>No notice needed</strong>None of the open flags are things the authors have to fix.</div>
+      {% endif %}
+
+    {% elif tab == "history" %}
+      {% if history %}
+      <div class="log">
+        {% for h in history %}
+        <div><span><b>{{ h.actor }}</b> {{ "dismissed" if h.action == "dismiss" else "restored" if h.action == "restore" else h.action }} {{ label(h.pl.code or "") }}</span><time>{{ h.ts[:16].replace("T", " ") }}</time>
+          {% if h.pl.reason %}<p>“{{ h.pl.reason }}”</p>{% endif %}</div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="ok-state"><strong>No decisions yet</strong>Dismissals and restores show up here with who made them and why.</div>
+      {% endif %}
+
+    {% else %}
+      {% for it in items %}{% set s = it.s %}
+      <article class="flag {{ s.severity }}">
+        <div class="top"><h3>{{ label(s.code) }}</h3><span class="tag {{ s.severity }}">{{ "Required" if s.severity == "fail" else "Worth a look" }}</span></div>
+        <p class="msg">{{ s.message }}</p>
+        {% if it.ev %}<dl class="ev">{% for k, v in it.ev %}<div><dt>{{ k }}</dt><dd>{{ v }}</dd></div>{% endfor %}</dl>{% endif %}
+        {% if it.hint %}<p class="fix"><svg class="ic" viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg>{{ it.hint }}</p>{% endif %}
+        <div class="acts">
+          {% if it.page and has_pdf %}<button class="btn sm" type="button" onclick="goto({{ it.page }})">Show page {{ it.page }}</button>{% endif %}
+          <details class="why">
+            <summary class="btn sm ghost">Dismiss…</summary>
+            <form class="reason" method="post" action="/paper/{{ p.id }}/dismiss">
+              <input type="hidden" name="code" value="{{ s.code }}">
+              <input name="reason" required placeholder="Why is this not a problem?" aria-label="Reason for dismissing">
+              <button class="btn sm primary">Dismiss</button>
+            </form>
+          </details>
+          <span class="src">{{ s.check_name }}</span>
+        </div>
+      </article>
+      {% else %}
+      <div class="ok-state"><strong>Nothing open</strong>Every check passed or its flag was dismissed.</div>
+      {% endfor %}
+
+      {% if gone %}
+      <p class="label">Dismissed, kept for the record</p>
+      {% for g in gone %}
+      <div class="gone">
+        <span>{{ label(g.s.code) }}</span>
+        <details class="why">
+          <summary class="btn sm">Restore…</summary>
+          <form class="reason" method="post" action="/paper/{{ p.id }}/restore">
+            <input type="hidden" name="code" value="{{ g.s.code }}">
+            <input name="reason" required placeholder="Why bring it back?" aria-label="Reason for restoring">
+            <button class="btn sm primary">Restore</button>
+          </form>
+        </details>
+      </div>
+      {% endfor %}
+      {% endif %}
+    {% endif %}
+    </div>
+  </section>
+</main>
+{% endblock %}
+{% block script %}
+<script>
+  function goto(n) { const f = document.getElementById("pdf"); f.src = "/paper/{{ p.id }}/pdf#page=" + n + "&view=FitH"; }
+  addEventListener("keydown", e => {
+    if (typing(e)) return;
+    {% if prev %}if (e.key === "k") location = "/paper/{{ prev }}";{% endif %}
+    {% if next %}if (e.key === "j") location = "/paper/{{ next }}";{% endif %}
+    if (e.key === "Escape" || e.key === "u") location = "/";
+  });
+  document.querySelectorAll("details.why").forEach(d => d.addEventListener("toggle", () => d.open && d.querySelector("input[name=reason]").focus()));
+</script>
+{% endblock %}

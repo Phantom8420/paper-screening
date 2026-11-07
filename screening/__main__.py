@@ -58,9 +58,20 @@ def main(argv=None):
     e = sub.add_parser("export", help="one CSV row per paper, for a spreadsheet or the submission system")
     e.add_argument("--batch", type=int)
     e.add_argument("--out", type=Path, default=Path("screening.csv"))
+    w = sub.add_parser("serve", help="open the chair web UI (needs: pip install -e .[web])")
+    w.add_argument("--host", default="127.0.0.1", help="no login yet, so keep this local unless the network is trusted")
+    w.add_argument("--port", type=int, default=8000)
+    w.add_argument("--by", default=getpass.getuser(), help="name recorded on dismissals made in the UI")
     args = ap.parse_args(argv)
 
     data = Path(args.data)
+    if args.cmd == "serve":
+        import uvicorn
+        from .web import create_app
+        connect(data / "screening.db").close()
+        print(f"Open http://{args.host}:{args.port} (Ctrl+C to stop)")
+        uvicorn.run(create_app(data, args.by), host=args.host, port=args.port, log_level="warning")
+        return
     con = connect(data / "screening.db")
     if args.cmd == "ingest":
         missing = [p for p in args.paths if not p.exists()]

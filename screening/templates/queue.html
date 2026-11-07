@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Review queue{% endblock %}
+{% block actions %}<a class="btn sm" href="/export.csv">Export CSV</a>{% endblock %}
+{% block body %}
+<main class="page">
+  <div class="hero">
+    <div>
+      {% if counts.todo %}
+      <h1>{{ counts.todo }} of {{ total }} papers need you</h1>
+      <p>Riskiest first. Every flag shows what it found and can be dismissed with a reason; nothing is decided until you decide it.</p>
+      {% elif total %}
+      <h1>All {{ total }} papers are clear</h1>
+      <p>No open flags. Dismissed flags stay on each paper's page with the reason you gave.</p>
+      {% else %}
+      <h1>No papers yet</h1>
+      <p>Ingest a batch with <code>python -m screening ingest</code>, then run the checks.</p>
+      {% endif %}
+    </div>
+    {% if total %}
+    <div class="meter" aria-label="Breakdown">
+      <div class="track">
+        {% for t, c in (("fail", "--fail"), ("look", "--look"), ("ok", "--ok")) %}{% if counts[t] %}<i style="width:{{ 100 * counts[t] / total }}%;background:var({{ c }})"></i>{% endif %}{% endfor %}
+      </div>
+      <div class="legend">
+        <span><i class="dot" style="color:var(--fail)"></i><b>{{ counts.fail }}</b> failed</span>
+        <span><i class="dot" style="color:var(--look)"></i><b>{{ counts.look }}</b> worth a look</span>
+        <span><i class="dot" style="color:var(--ok)"></i><b>{{ counts.ok }}</b> clear</span>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <nav class="seg" aria-label="Filter">
+    {% for key, name in (("todo", "To decide"), ("fail", "Failed a check"), ("look", "Worth a look"), ("ok", "All clear"), ("all", "All")) %}
+    <a href="/?show={{ key }}" class="{{ 'on' if show == key }}">{{ name }} <b>{{ total if key == 'all' else counts[key] }}</b></a>
+    {% endfor %}
+  </nav>
+
+  <div class="panel">
+    {% if rows %}
+    <table>
+      <thead><tr><th>Paper</th><th class="flg-col">Open flags</th><th>Risk</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr data-href="/paper/{{ r.p.id }}" class="{{ 'cur' if loop.first }}">
+          <td><a class="ptitle" href="/paper/{{ r.p.id }}">
+            <span class="ft {{ r.p.format }}">{{ {"latex": "TEX", "word": "DOC"}.get(r.p.format, "?") }}</span>
+            <span><strong>{{ r.p.title or "Untitled" }}</strong><span>{{ r.p.external_id or "#" ~ r.p.id }}{% if r.p.page_count %}, {{ r.p.page_count }} pages{% endif %}</span></span>
+          </a></td>
+          <td class="flg-col"><div class="flg">
+            {% for s in r.open[:4] %}<span class="tag {{ s.severity }}">{{ label(s.code) }}</span>{% endfor %}
+            {% if r.open|length > 4 %}<span class="tag plain">+{{ r.open|length - 4 }} more</span>{% endif %}
+            {% if not r.open %}<span class="tag ok">Clear</span>{% endif %}
+            {% if r.dismissed %}<span class="tag plain">{{ r.dismissed|length }} dismissed</span>{% endif %}
+          </div></td>
+          <td><div class="risk">
+            {% set w = [100, 50 * r.fails + 18 * r.warns]|min %}
+            <div class="t"><i style="width:{{ w }}%;background:var(--{{ 'fail' if r.fails else 'look' if r.warns else 'ok' }})"></i></div>
+            {{ "High" if r.fails else "Medium" if r.warns else "None" }}
+          </div></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty"><strong>Nothing here</strong>{% if show == "todo" %}Every paper is clear or has had its flags dismissed.{% else %}No papers match this filter.{% endif %}</div>
+    {% endif %}
+  </div>
+  {% if rows %}<div class="hint"><span><kbd>j</kbd> <kbd>k</kbd> move</span><span><kbd>Enter</kbd> open</span></div>{% endif %}
+</main>
+{% endblock %}
+{% block script %}
+<script>
+  const rows = [...document.querySelectorAll("tbody tr")];
+  let i = 0;
+  rows.forEach((r, n) => r.addEventListener("click", e => { if (!e.target.closest("a")) location = r.dataset.href; }));
+  addEventListener("keydown", e => {
+    if (typing(e) || !rows.length) return;
+    if (e.key === "j" || e.key === "k") {
+      rows[i].classList.remove("cur");
+      i = Math.max(0, Math.min(rows.length - 1, i + (e.key === "j" ? 1 : -1)));
+      rows[i].classList.add("cur"); rows[i].scrollIntoView({ block: "nearest" });
+    } else if (e.key === "Enter") location = rows[i].dataset.href;
+  });
+</script>
+{% endblock %}

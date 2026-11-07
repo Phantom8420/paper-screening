@@ -63,3 +63,12 @@ python -m screening ingest batch.zip paper.docx
 python -m screening status
 pytest
 ```
+
+Chair web UI (queue riskiest first, PDF beside each flag's evidence, dismiss/restore with a reason, notice drafts, dark and light themes):
+
+```bash
+pip install -e ".[web]"
+python -m screening serve        # http://127.0.0.1:8000, keys: j/k move, Enter open, u back
+```
+
+There is no login yet, so it binds to localhost; `--by` sets the name recorded on decisions.
