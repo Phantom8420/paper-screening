@@ -200,8 +200,11 @@ def compile_latex(root: Path, main: Path, outdir: Path):
                 p.unlink()
         (cwd / f"{rel.stem}.pdf").unlink(missing_ok=True)  # never accept a shipped "prebuilt" PDF
         _convert_eps(build)
-        ok, log = _run(["latexmk", "-norc", "-pdf", "-interaction=nonstopmode", "-halt-on-error", "-no-shell-escape",
-                        "-file-line-error", rel.name], cwd=cwd, env=env)
+        # a shipped .bbl is what the authors (and arXiv) compiled with; re-running BibTeX on a .bib with one
+        # syntax error would fail the whole build. The reference check still reads the .bib and reports it.
+        bib = ["-bibtex-"] if (cwd / f"{rel.stem}.bbl").is_file() else []
+        ok, log = _run(["latexmk", "-norc", "-pdf", *bib, "-interaction=nonstopmode", "-halt-on-error",
+                        "-no-shell-escape", "-file-line-error", rel.name], cwd=cwd, env=env)
         pdf = cwd / f"{rel.stem}.pdf"
         if ok and pdf.exists():
             return shutil.copy2(pdf, outdir / "paper.pdf"), None

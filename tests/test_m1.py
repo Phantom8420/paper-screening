@@ -216,6 +216,17 @@ def test_eps_figures_compile_without_shell_escape(tmp_path, con):
 
 
 @pytest.mark.skipif(not HAS_LATEX, reason="latexmk not installed")
+def test_shipped_bbl_is_used_when_the_bib_is_broken(tmp_path, con):
+    data = tmp_path / "data"
+    b = make_bundle(tmp_path / "p")
+    (b / "main.tex").write_text(MAIN_TEX.replace("Intro text.", "See \\cite{k}.\\bibliographystyle{plain}\\bibliography{refs}"))
+    (b / "refs.bib").write_text("@article{k, title={Unclosed\n")
+    (b / "main.bbl").write_text("\\begin{thebibliography}{1}\n\\bibitem{k} A. Author, Title, 2020.\n\\end{thebibliography}\n")
+    _, [pid] = ingest(con, [b], data)
+    assert convert_paper(con, pid, data) == "converted"
+
+
+@pytest.mark.skipif(not HAS_LATEX, reason="latexmk not installed")
 def test_latex_compiles(tmp_path, con):
     data = tmp_path / "data"
     _, [pid] = ingest(con, [make_bundle(tmp_path / "p")], data)
