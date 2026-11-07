@@ -2,7 +2,8 @@
 FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
         latexmk texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended \
-        texlive-bibtex-extra texlive-publishers biber libreoffice-writer-nogui \
+        texlive-bibtex-extra texlive-publishers texlive-science \
+        texlive-plain-generic texlive-fonts-extra biber libreoffice-writer-nogui \
     && rm -rf /var/lib/apt/lists/*
 RUN useradd -m app
 WORKDIR /app

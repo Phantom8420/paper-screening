@@ -153,6 +153,27 @@ def test_offline_latex_run_finds_citation_problems(tmp_path):
     assert stored == set(f)
 
 
+def test_bibliography_typed_into_the_tex_is_read(tmp_path):
+    data = tmp_path / "data"
+    con = connect(data / "t.db")
+    inline = ("\\begin{thebibliography}{9}\n\\bibitem{used} A. Author, ``A study of things,'' J. Things, 2020.\n"
+              "% \\bibitem{nokey} commented out, so still undefined\n\\end{thebibliography}")
+    b = bundle(tmp_path, tex=TEX.replace("\\bibliographystyle{plain}\n\\bibliography{refs}", inline))
+    (b / "refs.bib").unlink()
+    _, [pid] = ingest(con, [b], data)
+    f = {x[0]: x for x in run_references(con, pid, data, offline())}
+    assert [i["key"] for i in f["reference_undefined"][3]["items"]] == ["nokey"]  # not "used", not CIT005
+    assert "references_missing" not in f
+
+
+def test_ieee_abbreviation_file_is_not_missing(tmp_path):
+    data = tmp_path / "data"
+    con = connect(data / "t.db")
+    _, [pid] = ingest(con, [bundle(tmp_path, tex=TEX.replace("{refs}", "{IEEEabrv,refs}"))], data)
+    f = {x[0]: x for x in run_references(con, pid, data, offline())}
+    assert [i["key"] for i in f["reference_undefined"][3]["items"]] == ["nokey"]  # no CIT005 for IEEEabrv
+
+
 def sections(body, refs):
     return {"sections": [{"heading": "Introduction", "text": body}, {"heading": "References", "text": refs}]}
 

@@ -185,6 +185,19 @@ def test_latex_compile_failure_is_surfaced(tmp_path, con):
 
 
 @pytest.mark.skipif(not HAS_LATEX, reason="latexmk not installed")
+def test_missing_package_is_our_problem_not_the_authors(tmp_path, con):
+    from screening.review import notice
+    data = tmp_path / "data"
+    b = make_bundle(tmp_path / "p")
+    (b / "main.tex").write_text(MAIN_TEX.replace(r"\begin{document}", "\\usepackage{nosuchpkgxyz}\n\\begin{document}"))
+    _, [pid] = ingest(con, [b], data)
+    assert convert_paper(con, pid, data) == "needs_manual"
+    ev = json.loads(con.execute("SELECT evidence_json FROM signal WHERE code='latex_package_missing'").fetchone()[0])
+    assert ev["missing"] == ["nosuchpkgxyz.sty"]
+    assert notice(con, con.execute("SELECT * FROM paper WHERE id=?", (pid,)).fetchone()) is None
+
+
+@pytest.mark.skipif(not HAS_LATEX, reason="latexmk not installed")
 def test_latex_compiles(tmp_path, con):
     data = tmp_path / "data"
     _, [pid] = ingest(con, [make_bundle(tmp_path / "p")], data)

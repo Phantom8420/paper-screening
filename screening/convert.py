@@ -5,6 +5,7 @@ becomes a signal and marks the paper "needs_manual"; nothing is dropped.
 """
 import functools
 import json
+import logging
 import os
 import re
 import shutil
@@ -26,6 +27,8 @@ BLOCKS = {"Para", "Plain", "Header", "CodeBlock", "BlockQuote", "OrderedList", "
           "Table", "Div", "LineBlock", "DefinitionList", "Figure"}
 INCLUDE = re.compile(r"\\(?:input|include)\s*\{([^}]+)\}")
 COMMENT = re.compile(r"(?<!\\)%.*")
+logging.getLogger("pypdf").setLevel(logging.ERROR)  # font-encoding notes flood the terminal; text is unaffected
+MISSING_FILE = re.compile(r"File `([\w.-]+\.(?:sty|cls))' not found")
 
 
 def _kill_tree(p):
@@ -192,6 +195,12 @@ def compile_latex(root: Path, main: Path, outdir: Path):
         texlog = cwd / f"{rel.stem}.log"
         lines = texlog.read_text(errors="replace").splitlines() if texlog.exists() else log.splitlines()
         errors = [ln for ln in lines if ln.startswith("!") or ":error:" in ln or "not found" in ln][:20]
+        # a package the paper uses but this machine lacks is our problem, not the authors': never bounce it to them
+        missing = sorted({m for ln in errors for m in MISSING_FILE.findall(ln) if not any(build.rglob(m))})
+        if missing:
+            return None, ("latex_package_missing", "fail",
+                          f"This machine lacks {', '.join(missing)}; install it and re-run check (not an author error).",
+                          {"missing": missing, "errors": errors, "log_tail": log[-2000:]})
         return None, ("latex_compile_failed", "fail", "LaTeX did not compile.",
                       {"errors": errors, "log_tail": log[-2000:]})
 

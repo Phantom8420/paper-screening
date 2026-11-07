@@ -109,6 +109,23 @@ def sandbox_copy(src: Path, dest: Path) -> None:
         shutil.copyfile(p, out)
 
 
+SYSTEM_BIB = re.compile(r"'(?:[^'/]*/)?IEEE(?:abrv|full)(?:\.bib)?'", re.I)
+INLINE_BIB = re.compile(r"\\begin\{thebibliography\}.*?\\end\{thebibliography\}", re.S)
+
+
+def inline_bibliography(box: Path, main: Path) -> None:
+    """preflight reads thebibliography only from a .bbl; many IEEE papers type it into the .tex instead.
+    Without this every citation in them is reported undefined. Writes <main>.bbl, as LaTeX would read it."""
+    bbl = main.with_suffix(".bbl")
+    if bbl.exists():
+        return
+    for tex in [main, *sorted(p for p in box.rglob("*.tex") if p != main)]:
+        text = re.sub(r"(?<!\\)%.*", "", tex.read_text(encoding="utf-8", errors="replace"))
+        if m := INLINE_BIB.search(text):
+            bbl.write_text(m.group(0), encoding="utf-8")
+            return
+
+
 def docx_size(path: Path) -> int:
     # header sizes can lie, but zipfile stops reading at the declared size, so they bound memory
     with zipfile.ZipFile(path) as z:
@@ -188,6 +205,8 @@ def findings_from_report(report, root: Path | None = None) -> list:
     refs = {r.key: r for r in report.references}
     groups: dict[str, dict] = {}
     for f in report.findings:
+        if f.rule == "CIT005" and SYSTEM_BIB.search(f.message or ""):
+            continue  # ships with the IEEEtran class; authors are told not to include it
         code, message, override = next(((c, msg, o) for c, rules, msg, o in GROUPS if f.rule in rules),
                                         (*HYGIENE, None))
         severity = override or SEVERITY.get(f.severity, "info")
@@ -230,6 +249,7 @@ def check_with_preflight(target: Path, main: Path | None, data_dir: Path, rules)
                 box.mkdir()
                 sandbox_copy(target, box)
                 target, main = box, box / main.relative_to(target)
+                inline_bibliography(box, main)
             elif docx_size(target) > MAX_DOCX_BYTES:
                 raise TooLarge(f"the .docx expands beyond {MAX_DOCX_BYTES // 2**20} MB")
         except TooLarge as e:
