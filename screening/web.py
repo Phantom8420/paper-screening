@@ -4,16 +4,23 @@ Runs locally (python -m screening serve) and binds to 127.0.0.1 by default: ther
 who can reach the port acts as the chair named by --by.
 """
 import json
+import os
+import shutil
 import sqlite3
 import tempfile
+import threading
 from pathlib import Path
 
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from .compliance import load_rules
 from .db import connect
+from .importer import import_export
+from .intake import ingest
+from .pipeline import process
 from .review import FIX_HINTS, dismiss, evidence, export_csv, flags, notice, papers, restore
 
 HERE = Path(__file__).parent
@@ -49,11 +56,38 @@ def summary(con, p) -> dict:
     open_, dismissed = flags(con, p["id"])
     fails = sum(s["severity"] == "fail" for s in open_)
     return {"p": p, "open": open_, "dismissed": dismissed, "fails": fails, "warns": len(open_) - fails,
-            "tier": "fail" if fails else "look" if open_ else "ok"}
+            "tier": "wait" if p["status"] in ("ingested", "converted") else "fail" if fails else "look" if open_ else "ok"}
 
 
-def create_app(data: Path, actor: str) -> FastAPI:
+PAPER_TYPES = (".zip", ".pdf", ".docx", ".doc", ".rtf", ".odt", ".tex")
+EXPORT_TYPES = (".xlsx", ".xlsm", ".csv", ".json")
+
+
+def run_batch(data: Path, work: Path, files: list[Path], export: Path | None, rules, job: dict):
+    """Ingest, import, check; runs in a thread so the page can show progress. The uploads are copied into
+    the batch by ingest, so the work folder is removed afterwards."""
+    try:
+        con = connect(data / "screening.db")
+        try:
+            batch_id, ids = ingest(con, files, data, job["name"], actor=job["actor"])
+            job.update(batch=batch_id, ids=ids)
+            if export:
+                res = import_export(con, export, batch_id, job["actor"])
+                job["unmatched"] = len(res["unmatched"])
+        finally:
+            con.close()
+        process(data, ids, rules, jobs=min(4, os.cpu_count() or 1), convert=True)
+        job["state"] = "done"
+    except Exception as err:  # shown on the page; the batch so far stays and `check` finishes it
+        job.update(state="error", error=str(err) or type(err).__name__)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def create_app(data: Path, actor: str, rules=None) -> FastAPI:
     data = Path(data)
+    rules = rules or load_rules(None)
+    job: dict = {}  # the one batch being added; a second upload waits until it finishes
     app = FastAPI(title="Paper screening", docs_url=None, redoc_url=None)
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     tpl = Jinja2Templates(directory=HERE / "templates")
@@ -77,13 +111,79 @@ def create_app(data: Path, actor: str) -> FastAPI:
             con.close()
         counts = {t: sum(r["tier"] == t for r in rows) for t in ("fail", "look", "ok")}
         counts["todo"] = counts["fail"] + counts["look"]
+        total = len(rows)
         rows.sort(key=lambda r: (-r["fails"], -r["warns"], r["p"]["id"]))
         if show in ("fail", "look", "ok"):
             rows = [r for r in rows if r["tier"] == show]
         elif show == "todo":
-            rows = [r for r in rows if r["tier"] != "ok"]
+            rows = [r for r in rows if r["tier"] in ("fail", "look")]
         return tpl.TemplateResponse(request, "queue.html", {"rows": rows, "counts": counts, "show": show,
-                                                           "total": counts["todo"] + counts["ok"]})
+                                                           "total": total,
+                                                           "job": job_view()})
+
+    def job_view():
+        if not job:
+            return None
+        done = 0
+        if job.get("ids"):
+            con = db()
+            try:
+                q = ",".join("?" * len(job["ids"]))
+                done = con.execute(f"SELECT COUNT(*) FROM paper WHERE id IN ({q}) AND status IN ('checked','needs_manual')",
+                                   job["ids"]).fetchone()[0]
+            finally:
+                con.close()
+        return {**job, "done": done, "total": len(job.get("ids") or [])}
+
+    @app.get("/add")
+    def add_form(request: Request):
+        return tpl.TemplateResponse(request, "add.html", {"papers": ",".join(PAPER_TYPES),
+                                                         "exports": ",".join(EXPORT_TYPES), "error": None})
+
+    @app.post("/add")
+    def add(request: Request, papers_: list[UploadFile] = File(..., alias="papers"),
+            export: UploadFile | None = File(None), final: bool = Form(False)):
+        def fail(msg):
+            return tpl.TemplateResponse(request, "add.html", {"papers": ",".join(PAPER_TYPES),
+                                        "exports": ",".join(EXPORT_TYPES), "error": msg}, 400)
+        if job.get("state") == "running":
+            return fail("Papers are still being checked. Wait until they finish, then add more.")
+        uploads = [u for u in papers_ if u.filename]
+        if not uploads:
+            return fail("Choose the papers first: the .zip from your submission system, or the paper files.")
+        bad = [u.filename for u in uploads if Path(u.filename).suffix.lower() not in PAPER_TYPES]
+        if bad:
+            return fail(f"{', '.join(bad)} is not a paper file. Use a .zip, PDF, Word or LaTeX file.")
+        if export and export.filename and Path(export.filename).suffix.lower() not in EXPORT_TYPES:
+            return fail("The author list must be the .xlsx, .csv or .json file your submission system exports.")
+        (data / "tmp").mkdir(parents=True, exist_ok=True)
+        work = Path(tempfile.mkdtemp(prefix="upload-", dir=data / "tmp"))
+        files = []
+        for i, u in enumerate(uploads):
+            dst = work / "papers" / str(i) / Path(u.filename).name  # name only: no path from the browser
+            dst.parent.mkdir(parents=True)
+            with dst.open("wb") as f:
+                shutil.copyfileobj(u.file, f)
+            files.append(dst)
+        meta = None
+        if export and export.filename:
+            meta = work / Path(export.filename).name
+            with meta.open("wb") as f:
+                shutil.copyfileobj(export.file, f)
+        r = rules
+        if final:
+            r = {**rules, "anonymization": {**rules["anonymization"], "double_blind": False},
+                 "camera_ready": {**rules["camera_ready"], "enabled": True}}
+        job.clear()
+        job.update(state="running", actor=actor, files=len(files),
+                   name=", ".join(u.filename for u in uploads)[:120])
+        threading.Thread(target=run_batch, args=(data, work, files, meta, r, job), daemon=True).start()
+        return RedirectResponse("/?show=all", status_code=303)
+
+    @app.get("/job")
+    def job_status():
+        v = job_view()
+        return {k: v[k] for k in ("state", "done", "total", "error") if k in v} if v else {}
 
     @app.get("/paper/{pid}")
     def paper(request: Request, pid: int, tab: str = "flags"):
@@ -163,8 +263,6 @@ def create_app(data: Path, actor: str) -> FastAPI:
 def create_author_app(rules) -> FastAPI:
     """The public door: authors upload one paper and get the checklist. No queue, no stored papers, so this
     one is safe to put on a reachable address, unlike the chair app."""
-    from fastapi import File, UploadFile
-
     from .precheck import ACCEPTED, MAX_UPLOAD, precheck
 
     app = FastAPI(title="Paper pre-check", docs_url=None, redoc_url=None)

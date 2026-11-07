@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Check your paper{% endblock %}
+{% block barclass %}light{% endblock %}
 {% block body %}
 <main class="author">
   {% if not result %}
@@ -9,16 +10,19 @@
   {% if error %}<p class="err" role="alert">{{ error }}</p>{% endif %}
   <form method="post" enctype="multipart/form-data" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Checking, this takes about a minute…'">
     <label class="drop">
-      <strong>Choose your paper</strong>
-      <span>A Word file, or a .zip of your LaTeX folder. Up to {{ max_mb }} MB.</span>
-      <input type="file" name="paper" accept="{{ accept }}" required>
+      <svg class="ic" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3"/></svg>
+      <b>Drop your paper here or click to choose</b>
+      <em>A Word file, or a .zip of your LaTeX folder. Up to {{ max_mb }} MB.</em>
+      <input type="file" name="paper" accept="{{ accept }}" required aria-label="Your paper"
+        onchange="document.getElementById('picked').textContent = this.files[0]?.name || ''">
     </label>
+    <p class="files" id="picked" aria-live="polite"></p>
     <button class="btn green">Check my paper</button>
   </form>
   {% else %}
   {% set fails = result["items"]|selectattr("severity", "equalto", "fail")|list %}
   <h1>{{ "Fix these before you submit" if fails else "Ready to submit" if not result["items"] else "Almost ready" }}</h1>
-  <p>{{ filename }}{% if result.pages %}, {{ result.pages }} pages{% endif %}.
+  <p>{% if result.title %}{{ result.title }}, {% endif %}{{ filename }}{% if result.pages %}, {{ result.pages }} pages{% endif %}.
     {% if fails %}{{ fails|length }} must be fixed{% endif %}{% if fails and result["items"]|length > fails|length %}, {% endif %}
     {% if result["items"]|length > fails|length %}{{ result["items"]|length - fails|length }} worth checking{% endif %}{% if not result["items"] %}Every check passed{% endif %}.</p>
   {% for it in result["items"] %}

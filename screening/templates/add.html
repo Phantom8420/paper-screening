@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Add papers · Screening{% endblock %}
+{% block barclass %}light{% endblock %}
+{% block body %}
+<div class="dash">
+  <nav class="nav" aria-label="Papers">
+    <a class="side" href="/">Back to papers</a>
+  </nav>
+  <main class="add">
+    <h1>Add papers</h1>
+    <p>Every paper is checked for page limit, template, anonymity, sections and references. This takes about
+      a minute per ten papers, and you can keep this page open or come back later.</p>
+    {% if error %}<p class="err" role="alert">{{ error }}</p>{% endif %}
+    <form method="post" enctype="multipart/form-data" id="f">
+      <div class="step">
+        <strong>The papers</strong>
+        <span>The .zip your submission system gives you, or the paper files themselves (PDF, Word or LaTeX). You can choose several.</span>
+        <label class="drop" id="d1">
+          <svg class="ic" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3"/></svg>
+          <b>Drop files here or click to choose</b>
+          <em>.zip, .pdf, .docx, .tex</em>
+          <input type="file" name="papers" multiple required accept="{{ papers }}" aria-label="Paper files">
+        </label>
+        <p class="files" id="n1" aria-live="polite"></p>
+      </div>
+      <div class="step">
+        <strong>The author list <span class="note">(optional)</span></strong>
+        <span>The spreadsheet exported from EasyChair or HotCRP. With it, each paper gets its title, and the anonymity check looks for the real author names.</span>
+        <label class="drop small" id="d2">
+          <b>Choose the export file</b>
+          <em>.xlsx, .csv or .json</em>
+          <input type="file" name="export" accept="{{ exports }}" aria-label="Author list export">
+        </label>
+        <p class="files" id="n2" aria-live="polite"></p>
+      </div>
+      <label class="check"><input type="checkbox" name="final" value="true">
+        <span>These are final versions (camera-ready)<small>Checks for the author names, copyright notice and embedded fonts instead of anonymity.</small></span></label>
+      <button class="btn green go" id="go">Add and check papers</button>
+    </form>
+  </main>
+</div>
+{% endblock %}
+{% block script %}
+<script>
+  for (const [d, n] of [["d1", "n1"], ["d2", "n2"]]) {
+    const box = document.getElementById(d), input = box.querySelector("input"), out = document.getElementById(n);
+    const show = () => { const f = [...input.files]; out.textContent = f.length ? (f.length > 1 ? f.length + " files: " : "") + f.map(x => x.name).join(", ") : ""; };
+    input.addEventListener("change", show);
+    ["dragenter", "dragover"].forEach(e => box.addEventListener(e, () => box.classList.add("over")));
+    ["dragleave", "drop"].forEach(e => box.addEventListener(e, () => box.classList.remove("over")));
+  }
+  document.getElementById("f").addEventListener("submit", () => { const b = document.getElementById("go"); b.disabled = true; b.textContent = "Uploading…"; });
+</script>
+{% endblock %}

@@ -4,6 +4,15 @@ Organizer-side screening for conference submissions in LaTeX and Word. It runs t
 objective checks, links every flag to its evidence and keeps a full decision log.
 It recommends; people decide. Design: [docs/DESIGN.md](docs/DESIGN.md).
 
+## Start here (no command line)
+
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) once and start it.
+2. Double-click **Start Screening.bat** (Windows) or **Start Screening.command** (Mac). The first start sets things up, which takes 10 to 20 minutes once; after that it opens in seconds.
+3. Your browser opens the app. Click **Add papers**, choose the .zip from your submission system (and, if you have it, the author list it exports), and click **Add and check papers**.
+4. Papers with problems come first. Open one to see each problem next to the paper, dismiss what is wrong, and copy the notice for the authors.
+
+Keep the black window open while you work; closing it stops the app. Papers are kept between sessions.
+
 **Status:** M1 (intake, format routing, conversion), M2 (format and compliance checks) and M3 (reference verification). The other checks follow the milestones in the design doc.
 
 Compliance rules default to an IEEE conference (6 body pages + 2, double-blind). Override any of them with `--rules my_rules.toml`, e.g.
@@ -67,7 +76,7 @@ python -m screening status
 pytest
 ```
 
-Chair web UI (queue riskiest first, PDF beside each flag's evidence, dismiss/restore with a reason, notice drafts, dark and light themes):
+Chair web UI (queue riskiest first, PDF beside each flag's evidence, dismiss/restore with a reason, notice drafts, and an Add papers page that uploads a batch and checks it):
 
 ```bash
 pip install -e ".[web]"

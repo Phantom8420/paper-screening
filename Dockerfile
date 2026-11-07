@@ -9,7 +9,7 @@ RUN useradd -m app
 WORKDIR /app
 COPY pyproject.toml ./
 COPY screening ./screening
-RUN pip install --no-cache-dir . && mkdir /data && chown app /data
+RUN pip install --no-cache-dir ".[web]" && mkdir /data && chown app /data
 # a new named volume copies this ownership; without it the app user cannot create the database
 USER app
 ENV SCREENING_DATA=/data

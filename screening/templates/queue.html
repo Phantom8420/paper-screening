@@ -1,18 +1,34 @@
 {% extends "base.html" %}
 {% set filters = (("todo", "To decide"), ("fail", "Failed a check"), ("look", "Worth a look"), ("ok", "All clear"), ("all", "All papers")) %}
 {% block title %}Papers · Screening{% endblock %}
+{% block barclass %}light{% endblock %}
 {% block body %}
 <div class="dash">
   <nav class="nav" aria-label="Filter papers">
-    <a class="btn green" href="/export.csv">Export CSV</a>
+    <a class="btn green" href="/add">Add papers</a>
     {% for key, name in filters %}
     <a class="f {{ 'on' if show == key }}" href="/?show={{ key }}">{{ name }} <span>{{ total if key == "all" else counts[key] }}</span></a>
     {% endfor %}
+    <hr>
+    <a class="side" href="/export.csv">Download results (CSV)</a>
     <p class="foot">Checks only recommend. Nothing is decided until you decide it.</p>
   </nav>
 
   <main class="list">
     <h1>{{ dict(filters)[show] if show in dict(filters) else "Papers" }}</h1>
+    {% if job %}
+    <div class="job {{ job.state }}" id="job" role="status">
+      {% if job.state == "running" %}
+      <span class="spin" aria-hidden="true"></span>
+      <span id="jobtext">{% if job.total and job.done == job.total %}Looking up the references online…{% elif job.total %}Checking papers: {{ job.done }} of {{ job.total }} done{% else %}Unpacking {{ job.files }} file(s)…{% endif %}</span>
+      <progress id="jobbar" max="{{ job.total or 1 }}" value="{{ job.done }}"></progress>
+      {% elif job.state == "done" %}
+      <span>{{ job.total }} paper(s) added and checked.{% if job.unmatched %} {{ job.unmatched }} could not be matched to the author list; check that the file names carry the submission numbers.{% endif %}</span>
+      {% else %}
+      <span>Adding papers stopped: {{ job.error }}. The papers added so far are below.</span>
+      {% endif %}
+    </div>
+    {% endif %}
     {% if total %}
     <label class="search"><svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>
       <input id="q" type="search" placeholder="Search by title, ID or flag" aria-label="Search papers"></label>
@@ -31,7 +47,7 @@
             {% if r.dismissed %}<span class="pill plain">{{ r.dismissed|length }} dismissed</span>{% endif %}
           </div></td>
           <td class="n hide-sm">{{ r.p.page_count or "–" }}</td>
-          <td class="n">{% if r.fails %}<span class="pill fail">{{ r.fails }} required</span>{% elif r.warns %}<span class="pill warn">{{ r.warns }} to check</span>{% else %}<span class="pill ok">Clear</span>{% endif %}</td>
+          <td class="n">{% if r.tier == "wait" %}<span class="pill plain">Checking…</span>{% elif r.fails %}<span class="pill fail">{{ r.fails }} required</span>{% elif r.warns %}<span class="pill warn">{{ r.warns }} to check</span>{% else %}<span class="pill ok">Clear</span>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>
@@ -40,7 +56,7 @@
     {% elif total %}
     <div class="empty"><strong>Nothing here</strong>{% if show == "todo" %}Every paper is clear or has had its flags dismissed.{% else %}No papers match this filter.{% endif %}</div>
     {% else %}
-    <div class="empty"><strong>No papers yet</strong>Ingest a batch with <code>python -m screening ingest</code>; it shows up here once checked.</div>
+    <div class="empty"><strong>No papers yet</strong>{% if not job %}<p>Add the papers you received, and every one is checked for you.</p><p><a class="btn green" href="/add">Add papers</a></p>{% endif %}</div>
     {% endif %}
   </main>
 </div>
@@ -60,5 +76,13 @@
     else if (e.key === "Enter" && vis()[i]) location = vis()[i].dataset.href;
   });
   if (all.length) mark(0);
+  const job = document.getElementById("jobtext");
+  if (job) setInterval(async () => {
+    try {
+      const j = await (await fetch("/job")).json();
+      if (j.state !== "running") return location.reload();
+      if (j.total) { job.textContent = j.done === j.total ? "Looking up the references online…" : `Checking papers: ${j.done} of ${j.total} done`; const b = document.getElementById("jobbar"); b.max = j.total; b.value = j.done; }
+    } catch (e) {}
+  }, 3000);
 </script>
 {% endblock %}

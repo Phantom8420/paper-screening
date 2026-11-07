@@ -1,6 +1,6 @@
 /* Layout follows the LaTeX-editor pattern chairs already know: a project list, then a log panel beside the PDF. */
 
-:root, :root[data-theme="light"] {
+:root {
   color-scheme: light;
   --bar: #1B222C; --bar-ink: #FFFFFF; --bar-sub: #A6AEBA; --bar-hover: #2F3A4C;
   --bg: #FFFFFF; --soft: #F4F5F6; --line: #DFE3E8; --line-2: #EEF0F2;
@@ -10,17 +10,6 @@
   --warn: #8F5514; --warn-wash: #FCF1E3; --warn-line: #F0D3AC;
   --ok: #098842;
   --code: #F4F5F6; --pdf: #E7E9EE;
-}
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --bar: #1B222C; --bar-ink: #FFFFFF; --bar-sub: #A6AEBA; --bar-hover: #2F3A4C;
-  --bg: #2C3645; --soft: #232B37; --line: #3D4757; --line-2: #354050;
-  --ink: #F4F5F6; --sub: #B5BCC7; --faint: #8D96A3;
-  --green: #1BA35A; --green-hover: #22B866; --green-wash: #1E3A2C; --link: #8DB1EB;
-  --err: #F29B94; --err-wash: #3F2A2E; --err-line: #6B3A3A;
-  --warn: #F2C27E; --warn-wash: #3D3427; --warn-line: #6B5634;
-  --ok: #5DCB8A;
-  --code: #1F2632; --pdf: #1B222C;
 }
 
 * { box-sizing: border-box; margin: 0; }
@@ -44,9 +33,6 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-radius: 3px; paddin
 .bar .title { flex: 1; text-align: center; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 12px; }
 .bar .sp { flex: 1; }
 .bar .who { color: var(--bar-sub); font-size: 13px; padding: 0 8px; }
-.theme .moon { display: none; }
-:root[data-theme="light"] .theme .moon { display: block; }
-:root[data-theme="light"] .theme .sun { display: none; }
 
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 16px; border: 1px solid var(--line); background: var(--bg); cursor: pointer; font-weight: 600; font-size: 13px; white-space: nowrap; }
 .btn:hover { background: var(--soft); }
@@ -160,7 +146,48 @@ details.why[open] summary { display: none; }
 .author { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; display: grid; gap: 16px; }
 .author h1 { font-size: 24px; margin: 0; }
 .author form { display: grid; gap: 12px; }
-.drop { display: grid; gap: 6px; padding: 28px; border: 2px dashed var(--line, #c9ced6); border-radius: 8px; cursor: pointer; }
-.drop span { color: var(--muted, #5b6470); font-size: 14px; }
-.err { color: #b42318; font-weight: 600; margin: 0; }
-.passed { margin: 0; padding-left: 20px; color: var(--muted, #5b6470); }
+.err { color: var(--err); font-weight: 600; margin: 0; }
+.passed { margin: 0; padding-left: 20px; color: var(--sub); }
+
+/* Dashboard bar is white, as on the project list; the paper screen keeps the dark editor toolbar */
+.bar.light { background: var(--bg); color: var(--ink); border-bottom: 1px solid var(--line); }
+.bar.light a, .bar.light button { color: var(--ink); }
+.bar.light a:hover { background: var(--soft); }
+.bar.light .brand { color: var(--green); font-size: 16px; }
+.bar.light .who { color: var(--sub); }
+.nav .btn.green { height: 36px; border-radius: 18px; font-size: 14px; }
+.nav .side { color: var(--link); padding: 7px 12px; border-radius: 4px; }
+.nav .side:hover { background: var(--line-2); }
+.nav hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
+
+/* Running batch banner */
+.job { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 4px; background: var(--soft); margin-bottom: 16px; }
+.job.done { background: var(--green-wash); border-color: transparent; }
+.job.error { background: var(--err-wash); border-color: var(--err-line); color: var(--err); }
+.job progress { flex: 1; max-width: 280px; height: 8px; accent-color: var(--green); }
+.spin { width: 16px; height: 16px; border: 2px solid var(--line); border-top-color: var(--green); border-radius: 50%; animation: spin 1s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+/* Add papers */
+.add { max-width: 680px; padding: 24px 32px 48px; }
+.add h1 { font-size: 22px; font-weight: 600; margin-bottom: 6px; }
+.add > p { color: var(--sub); margin-bottom: 20px; }
+.add form { display: grid; gap: 16px; }
+.step { display: grid; gap: 8px; }
+.step > strong { font-size: 15px; }
+.step > span { color: var(--sub); font-size: 13px; }
+.drop { position: relative; display: grid; gap: 4px; place-items: center; text-align: center; padding: 32px 16px; border: 2px dashed var(--line); border-radius: 8px; background: var(--bg); cursor: pointer; }
+.drop:hover, .drop.over { border-color: var(--green); background: var(--green-wash); }
+.drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.drop .ic { width: 28px; height: 28px; color: var(--green); }
+.drop b { font-weight: 600; }
+.drop em { font-style: normal; color: var(--sub); font-size: 13px; }
+.drop.small { padding: 18px 16px; }
+.files { font-size: 13px; color: var(--ink); font-weight: 600; min-height: 1.5em; }
+.check { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; }
+.check input { margin-top: 3px; accent-color: var(--green); }
+.check small { display: block; color: var(--sub); }
+.add .go { justify-self: start; height: 40px; padding: 0 22px; border-radius: 20px; font-size: 15px; }
+.empty p { margin-top: 8px; }
+@media (max-width: 960px) { .add { padding: 16px; } }

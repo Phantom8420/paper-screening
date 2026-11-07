@@ -75,7 +75,7 @@ def main(argv=None):
     w.add_argument("--by", default=getpass.getuser(), help="name recorded on dismissals made in the UI")
     w.add_argument("--authors", action="store_true",
                    help="serve the author pre-check page instead: upload one paper, get the checklist, nothing kept")
-    w.add_argument("--rules", type=Path, help="TOML file overriding the default IEEE rules (--authors only)")
+    w.add_argument("--rules", type=Path, help="TOML file overriding the default IEEE rules (used for papers added and checked from the page)")
     args = ap.parse_args(argv)
 
     data = Path(args.data)
@@ -87,7 +87,7 @@ def main(argv=None):
             app = create_author_app(load_rules(args.rules))
         else:
             connect(data / "screening.db").close()
-            app = create_app(data, args.by)
+            app = create_app(data, args.by, load_rules(args.rules))
         print(f"Open http://{args.host}:{args.port} (Ctrl+C to stop)")
         uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
         return
