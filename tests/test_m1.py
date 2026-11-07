@@ -197,6 +197,24 @@ def test_missing_package_is_our_problem_not_the_authors(tmp_path, con):
     assert notice(con, con.execute("SELECT * FROM paper WHERE id=?", (pid,)).fetchone()) is None
 
 
+EPS = """%!PS-Adobe-3.0 EPSF-3.0
+%%BoundingBox: 0 0 20 20
+newpath 0 0 moveto 20 20 lineto stroke
+showpage
+"""
+
+
+@pytest.mark.skipif(not HAS_LATEX, reason="latexmk not installed")
+def test_eps_figures_compile_without_shell_escape(tmp_path, con):
+    data = tmp_path / "data"
+    b = make_bundle(tmp_path / "p")
+    (b / "fig.eps").write_text(EPS)
+    (b / "main.tex").write_text(MAIN_TEX.replace(r"\begin{document}", "\\usepackage{graphicx}\n\\begin{document}")
+                                .replace("Intro text.", "\\includegraphics{fig.eps}"))
+    _, [pid] = ingest(con, [b], data)
+    assert convert_paper(con, pid, data) == "converted"
+
+
 @pytest.mark.skipif(not HAS_LATEX, reason="latexmk not installed")
 def test_latex_compiles(tmp_path, con):
     data = tmp_path / "data"

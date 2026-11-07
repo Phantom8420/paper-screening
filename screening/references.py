@@ -122,8 +122,17 @@ def inline_bibliography(box: Path, main: Path) -> None:
     for tex in [main, *sorted(p for p in box.rglob("*.tex") if p != main)]:
         text = re.sub(r"(?<!\\)%.*", "", tex.read_text(encoding="utf-8", errors="replace"))
         if m := INLINE_BIB.search(text):
-            bbl.write_text(m.group(0), encoding="utf-8")
+            bbl.write_text(_tidy_bibitems(m.group(0)), encoding="utf-8")
             return
+
+
+# hand-typed reference lists, seen in real papers; preflight expects what BibTeX would write
+EMPH_ETAL = re.compile(r"\\(?:emph|textit)\s*\{\s*(et\s*~?\s*al\.?)\s*\}")  # else "\emph{and others}" is an author
+STRAIGHT_CLOSE = re.compile(r"``((?:(?!'')[^`\"])+?)\"")  # ``Title," closed with a straight quote: title lost
+
+
+def _tidy_bibitems(block: str) -> str:
+    return STRAIGHT_CLOSE.sub(r"``\1''", EMPH_ETAL.sub(r"\1", block))
 
 
 def docx_size(path: Path) -> int:

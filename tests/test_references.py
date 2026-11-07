@@ -166,6 +166,17 @@ def test_bibliography_typed_into_the_tex_is_read(tmp_path):
     assert "references_missing" not in f
 
 
+def test_hand_typed_reference_quirks_are_tidied():
+    from screening.references import _tidy_bibitems
+    block = ("\\bibitem{a} M.~Al-Quraan \\emph{et~al.}, ``A hybrid approach,'' in Proc. SDS, 2021.\n"
+             "\\bibitem{b} Y. Deng, ``AUCTION: Users' client selection,\" IEEE TPDS, 2021.\n"
+             "\\bibitem{c} A. B, ``Fine,'' 2020, \"quoted\" note.")
+    assert _tidy_bibitems(block) == (
+        "\\bibitem{a} M.~Al-Quraan et~al., ``A hybrid approach,'' in Proc. SDS, 2021.\n"
+        "\\bibitem{b} Y. Deng, ``AUCTION: Users' client selection,'' IEEE TPDS, 2021.\n"
+        "\\bibitem{c} A. B, ``Fine,'' 2020, \"quoted\" note.")
+
+
 def test_ieee_abbreviation_file_is_not_missing(tmp_path):
     data = tmp_path / "data"
     con = connect(data / "t.db")

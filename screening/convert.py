@@ -28,6 +28,7 @@ BLOCKS = {"Para", "Plain", "Header", "CodeBlock", "BlockQuote", "OrderedList", "
 INCLUDE = re.compile(r"\\(?:input|include)\s*\{([^}]+)\}")
 COMMENT = re.compile(r"(?<!\\)%.*")
 logging.getLogger("pypdf").setLevel(logging.ERROR)  # font-encoding notes flood the terminal; text is unaffected
+FILE_LINE_ERROR = re.compile(r"^\S+:\d+: ")  # how -file-line-error prints errors ("!" only without it)
 MISSING_FILE = re.compile(r"File `([\w.-]+\.(?:sty|cls))' not found")
 
 
@@ -173,6 +174,17 @@ def soffice_convert(src: Path, outdir: Path, target: str):
                   {"log_tail": log[-2000:]})
 
 
+def _convert_eps(build: Path) -> None:
+    """pdflatex can include .eps only by running repstopdf through shell escape, which stays off. Convert them
+    beforehand to the file name pdflatex looks for (epstopdf runs Ghostscript with -dSAFER, no shell)."""
+    if not _which("epstopdf"):
+        return
+    for eps in build.rglob("*.eps"):
+        out = eps.with_name(f"{eps.stem}-eps-converted-to.pdf")
+        if eps.is_file() and not eps.is_symlink() and not out.exists():
+            _run(["epstopdf", f"--outfile=./{out.name}", f"./{eps.name}"], cwd=eps.parent)  # a failure shows up as LaTeX's
+
+
 def compile_latex(root: Path, main: Path, outdir: Path):
     """latexmk in a throwaway copy, no shell escape, file access limited to the bundle."""
     if not _which("latexmk"):
@@ -187,6 +199,7 @@ def compile_latex(root: Path, main: Path, outdir: Path):
             if p.is_file() and (p.name.lower() in ("latexmkrc", ".latexmkrc") or p.suffix == ".fdb_latexmk"):
                 p.unlink()
         (cwd / f"{rel.stem}.pdf").unlink(missing_ok=True)  # never accept a shipped "prebuilt" PDF
+        _convert_eps(build)
         ok, log = _run(["latexmk", "-norc", "-pdf", "-interaction=nonstopmode", "-halt-on-error", "-no-shell-escape",
                         "-file-line-error", rel.name], cwd=cwd, env=env)
         pdf = cwd / f"{rel.stem}.pdf"
@@ -194,7 +207,7 @@ def compile_latex(root: Path, main: Path, outdir: Path):
             return shutil.copy2(pdf, outdir / "paper.pdf"), None
         texlog = cwd / f"{rel.stem}.log"
         lines = texlog.read_text(errors="replace").splitlines() if texlog.exists() else log.splitlines()
-        errors = [ln for ln in lines if ln.startswith("!") or ":error:" in ln or "not found" in ln][:20]
+        errors = [ln for ln in lines if ln.startswith("!") or FILE_LINE_ERROR.match(ln) or "not found" in ln][:20]
         # a package the paper uses but this machine lacks is our problem, not the authors': never bounce it to them
         missing = sorted({m for ln in errors for m in MISSING_FILE.findall(ln) if not any(build.rglob(m))})
         if missing:
