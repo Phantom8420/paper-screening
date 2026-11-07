@@ -69,6 +69,14 @@ PLACEHOLDER = re.compile(  # the whole author string must be placeholder words; 
 SELF_REF = re.compile(r"\b(?:our|my)\s+(?:previous|prior|earlier|recent)\s+(?:work|paper|study|studies|publication)s?\b"
                       r"|\bwe\s+(?:have\s+)?previously\s+(?:proposed|presented|shown|introduced|published)\b"
                       r"|\bin\s+our\s+(?:previous|prior|earlier)\b", re.I)
+# repo/profile links name their owner; anonymous.4open.science and "anonymous" accounts are the sanctioned way
+OWNER_LINK = re.compile(  # quantifiers are bounded: this runs on untrusted text and must stay linear
+    r"(?<![\w.-])(?:https?://)?(?:www\.)?(?:(?:(?:github|gitlab|bitbucket|huggingface|kaggle)\.(?:com|org|co)"
+    r"|sites\.google\.com/view|scholar\.google\.[a-z.]{2,10}/citations\?user=|orcid\.org|linkedin\.com/in)"
+    r"/([\w.~=-]{1,80})|([\w-]{1,40})\.github\.io\b|https?://[^\s/]{1,100}(?:/[^\s/~]{1,100}){0,5}/(~[\w.-]{1,40}))",
+    re.I)
+ANON_OWNER = re.compile(r"~?(?:anon(?:ymous|ymi[sz]ed)?|redacted|withheld|blinded|double-?blind)(?:[-_.]\w*)?", re.I)
+NOT_BODY = ("reference", "bibliograph")
 AUTHOR_MACRO = re.compile(r"\\(?:IEEEauthorblock[NA]|author|thanks)\s*\{")
 GENERIC_USERS = {"", "user", "admin", "administrator", "author", "owner", "unknown", "microsoft office user",
                  "windows user", "office user"}
@@ -300,6 +308,15 @@ def check_anonymity(struct, text, latex_src, file_meta, author_names, rules) -> 
     if snippets := _snippets(SELF_REF, text):
         out.append(_f("self_reference", "warn", "Phrases that may reveal the authors' earlier work.",
                       {"snippets": snippets}))
+
+    # the owner segment decides; links that are in the reference list cite other people's work
+    refs = "\n".join(x["text"] for x in sections if _norm(x.get("heading") or "").startswith(NOT_BODY))
+    links = [m.group(0) for m in OWNER_LINK.finditer(text)
+             if not ANON_OWNER.fullmatch(next(g for g in m.groups() if g)) and m.group(0) not in refs]
+    if links:
+        out.append(_f("identifying_link", "warn",
+                      "Links to code, profile or personal pages may name the authors; ask for an anonymized link.",
+                      {"links": list(dict.fromkeys(links))[:10]}))
 
     ack = [s for s in sections if s.get("heading") and _norm(s["heading"]).startswith(ACKNOWLEDGMENTS)
            and len(s["text"].strip()) > 20]

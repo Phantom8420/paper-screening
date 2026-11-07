@@ -36,6 +36,14 @@ Measured on a laptop with a synthetic 300-paper batch (half LaTeX, half Word), o
 disabled_sources = ["web", "wayback"]   # turns s2 back on
 ```
 
+### Working through a batch
+
+- `status --sort risk` puts papers with the most failures first; `status -v` adds each flag's message and, where the authors can fix it, a one-line fix.
+- `dismiss <paper> <code> --reason "..."` hides a flag you checked and judged wrong. It stays hidden on re-runs as long as its evidence is the same, and comes back if the evidence changes (a new email address, another page over). `restore` undoes it. Both are recorded with who and why.
+- `check` ends with what changed per paper since the last run (`+new_flag`, `-resolved_flag`), so a resubmitted batch shows at a glance who fixed what.
+- `notices` writes one plain-text fix request per paper into `data/notices/`, listing only problems the authors can fix (tool gaps and lookups that did not finish stay with the chairs), with the evidence. Nothing is sent.
+- `export --out screening.csv` writes one row per paper (fails, warnings, dismissed, flags, whether the authors have something to fix) for a spreadsheet.
+
 ## Run
 
 Full toolchain (LaTeX, LibreOffice) in Docker:

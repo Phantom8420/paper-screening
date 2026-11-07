@@ -1,0 +1,193 @@
+"""Chair workflow on top of the signals: dismissals that survive re-runs, fix hints, author notices, CSV export.
+
+A dismissal is an append-only 'override' decision tied to the flag's evidence. If a re-run produces the same
+evidence the flag stays dismissed; if the evidence changes (a new email address, another page over the limit)
+it comes back. Restoring a flag is another decision, so every step is reversible and in the audit log.
+"""
+import csv
+import hashlib
+import json
+
+from .db import audit, current_signals, now
+
+# What the authors should do. Only flags listed here go into an author notice; the rest (tool gaps, crashes,
+# lookups we could not finish) are the organizers' business.
+FIX_HINTS = {
+    "page_limit_exceeded": "Shorten the paper to the page limit.",
+    "body_page_limit_exceeded": "Shorten the main text to the page limit; only references may use the extra pages.",
+    "paper_size": "Export the PDF at the required paper size (US Letter for IEEE).",
+    "missing_sections": "Add the required sections.",
+    "missing_abstract": "Add an abstract.",
+    "abstract_too_long": "Shorten the abstract to the word limit.",
+    "missing_keywords": "Add a keywords (Index Terms) line after the abstract.",
+    "author_block_present": "Remove author names and affiliations for double-blind review.",
+    "affiliation_in_front_matter": "Remove the author block (names, emails, affiliations) above the abstract.",
+    "email_in_text": "Remove email addresses from the paper.",
+    "known_author_named": "Remove author names from the text, or cite your own work in the third person.",
+    "self_reference": "Cite your own earlier work in the third person (\"Smith et al. [3] showed\").",
+    "identifying_link": "Replace code or profile links with an anonymized one (e.g. anonymous.4open.science).",
+    "acknowledgments_present": "Remove the acknowledgments until the camera-ready version.",
+    "file_metadata_identifies": "Clear author names from the file properties (Word: File > Info > Inspect "
+                                "Document; LaTeX: \\hypersetup{pdfauthor={}}).",
+    "tracked_changes_or_comments": "Accept or reject all tracked changes and delete comments before submitting.",
+    "wrong_template": "Use the conference template.",
+    "layout_modified": "Restore the template's margins and spacing.",
+    "negative_vspace": "Remove negative \\vspace / \\vskip that squeeze the layout.",
+    "font_mismatch": "Use the template's fonts.",
+    "template_options": "Use the template's document class options.",
+    "latex_compile_failed": "Make sure the sources compile with pdflatex and include every figure and .bib file.",
+    "no_main_tex": "Include the main .tex file in the upload.",
+    "multiple_main_tex": "Upload only one paper per submission, or remove unused .tex files with \\documentclass.",
+    "corrupt_file": "Upload the file again; the one received cannot be opened.",
+    "empty_input": "Upload the paper; the file received is empty.",
+    "unsupported_file": "Upload a .tex bundle (zip), .docx or .pdf.",
+    "reference_undefined": "Add the missing bibliography entries for these citations.",
+    "reference_not_found": "Check these references; they could not be found in any index (typo, wrong DOI or "
+                           "invented reference).",
+    "reference_retracted": "Remove or justify citations of retracted work.",
+    "reference_mismatch": "Correct these references' details (title, authors, year or DOI disagree with the "
+                          "published record).",
+    "reference_uncited": "Cite these references in the text or remove them.",
+}
+RISK = {"fail": 2, "warn": 1, "info": 0}
+
+
+def evidence(signal) -> dict:
+    try:
+        ev = json.loads(signal["evidence_json"] or "{}")
+    except ValueError:
+        return {}
+    return ev if isinstance(ev, dict) else {}
+
+
+def _key(sigs) -> str:
+    """One hash over every current signal with this code, so a code raised twice is dismissed as one."""
+    blob = json.dumps(sorted(json.dumps([s["check_name"], evidence(s)], sort_keys=True) for s in sigs))
+    return hashlib.sha256(blob.encode()).hexdigest()[:16]
+
+
+def _dismissals(con, paper_id) -> dict:
+    """code -> latest dismiss/restore value for this paper."""
+    latest = {}
+    for d in con.execute("SELECT value FROM decision WHERE paper_id=? AND kind='override' ORDER BY id", (paper_id,)):
+        try:
+            v = json.loads(d["value"])
+            latest[v["code"]] = v
+        except (ValueError, KeyError, TypeError):  # an override written by something else; not a dismissal
+            continue
+    return latest
+
+
+def _by_code(con, paper_id) -> dict:
+    groups = {}
+    for s in current_signals(con, paper_id):
+        if s["severity"] != "info":
+            groups.setdefault(s["code"], []).append(s)
+    return groups
+
+
+def flags(con, paper_id) -> tuple[list, list]:
+    """(open, dismissed) warn/fail signals for a paper."""
+    dis = _dismissals(con, paper_id)
+    open_, dismissed = [], []
+    for code, sigs in _by_code(con, paper_id).items():
+        v = dis.get(code, {})
+        hit = v.get("action") == "dismiss" and v.get("evidence") == _key(sigs)
+        (dismissed if hit else open_).extend(sigs)
+    open_.sort(key=lambda s: (-RISK[s["severity"]], s["id"]))  # fails first, then in check order
+    return open_, dismissed
+
+
+def _decide(con, paper_id, code, action, reason, actor):
+    if not reason.strip():
+        raise ValueError("a reason is required")
+    sigs = _by_code(con, paper_id).get(code)
+    if not sigs:
+        raise ValueError(f"paper {paper_id} has no current {code} flag")
+    value = {"action": action, "code": code, "evidence": _key(sigs)}
+    con.execute("INSERT INTO decision(paper_id, actor, kind, value, reason, signal_id, created_at)"
+                " VALUES(?,?,?,?,?,?,?)", (paper_id, actor, "override", json.dumps(value), reason, sigs[0]["id"], now()))
+    audit(con, actor, action, "paper", paper_id, {"code": code, "reason": reason})
+    con.commit()
+
+
+def dismiss(con, paper_id, code, reason, actor):
+    _decide(con, paper_id, code, "dismiss", reason, actor)
+
+
+def restore(con, paper_id, code, reason, actor):
+    _decide(con, paper_id, code, "restore", reason, actor)
+
+
+def snapshot(con, ids) -> dict:
+    return {pid: {s["code"] for s in flags(con, pid)[0]} for pid in ids}
+
+
+def changes(before: dict, after: dict) -> list[str]:
+    lines = []
+    for pid in sorted(after):
+        new, gone = after[pid] - before.get(pid, set()), before.get(pid, set()) - after[pid]
+        if new or gone:
+            lines.append(f"  paper {pid}: " + ", ".join([f"+{c}" for c in sorted(new)] + [f"-{c}" for c in sorted(gone)]))
+    return lines
+
+
+def _evidence_lines(evidence: dict, limit=5) -> list[str]:
+    out = []
+    for key, val in evidence.items():
+        if key in ("truncated", "error") or val in (None, "", [], {}):
+            continue
+        items = val if isinstance(val, list) else [val]
+        for item in items[:limit]:
+            if isinstance(item, dict):
+                item = ", ".join(f"{k}: {v}" for k, v in item.items() if v not in (None, "", [], {}))
+            out.append(f"     - {str(item)[:200]}")
+        if isinstance(val, list) and len(val) > limit:
+            out.append(f"     - ... and {len(val) - limit} more")
+    return out
+
+
+def notice(con, paper) -> str | None:
+    """Plain-text draft asking the authors to fix the open flags that are theirs to fix; None if there are none.
+    Nothing is sent: a chair reads, edits and sends it."""
+    mine = [s for s in flags(con, paper["id"])[0] if s["code"] in FIX_HINTS]
+    if not mine:
+        return None
+    ref = paper["external_id"] or f"#{paper['id']}"
+    lines = [f"Subject: Submission {ref}: please fix before review", "",
+             "Dear authors,", "",
+             f"An automated check of submission {ref}"
+             + (f" (\"{paper['title']}\")" if paper["title"] else "")
+             + " found the following. Items marked REQUIRED must be fixed for the paper to go to review;",
+             "the others are worth a look. If you think a finding is wrong, reply and a chair will check it.", ""]
+    for n, s in enumerate(mine, 1):
+        tag = "REQUIRED" if s["severity"] == "fail" else "CHECK"
+        lines.append(f"{n}. [{tag}] {FIX_HINTS[s['code']]}")
+        lines.append(f"   Found: {s['message']}")
+        lines += _evidence_lines(evidence(s))
+    lines += ["", "Best regards,", "The program chairs"]
+    return "\n".join(lines) + "\n"
+
+
+def _cell(v):
+    """Spreadsheets run cells that start with = + - @ as formulas; titles and ids come from submitters."""
+    return "'" + v if isinstance(v, str) and v.startswith(("=", "+", "-", "@", "\t", "\r")) else v
+
+
+def papers(con, batch_id=None):
+    return con.execute("SELECT * FROM paper WHERE (? IS NULL OR batch_id=?) ORDER BY id", (batch_id, batch_id)).fetchall()
+
+
+def export_csv(con, out, batch_id=None) -> int:
+    rows = papers(con, batch_id)
+    with open(out, "w", newline="", encoding="utf-8-sig") as fh:  # BOM so Excel reads UTF-8 titles correctly
+        w = csv.writer(fh)
+        w.writerow(["paper_id", "external_id", "title", "format", "status", "pages", "fails", "warnings",
+                    "dismissed", "flags", "authors_can_fix"])
+        for p in rows:
+            open_, dismissed = flags(con, p["id"])
+            w.writerow([p["id"], _cell(p["external_id"]), _cell(p["title"]), p["format"], p["status"], p["page_count"],
+                        sum(s["severity"] == "fail" for s in open_), sum(s["severity"] == "warn" for s in open_),
+                        len(dismissed), "; ".join(f"{s['severity']}:{s['code']}" for s in open_),
+                        "yes" if any(s["code"] in FIX_HINTS for s in open_) else "no"])
+    return len(rows)

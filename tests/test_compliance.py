@@ -312,3 +312,18 @@ def test_bad_docx_is_its_own_finding(tmp_path):
     f = run_compliance(con, pid, data)
     assert "docx_unreadable" in codes(f, "fail") and "compliance_crashed" not in codes(f)
     assert "sections_ok" in codes(f)  # other stages still report
+
+
+def test_owner_links_flagged_but_anonymized_links_pass():
+    text = ("Code: https://github.com/janedoe/tool, demo at jane.github.io and http://cs.uni.edu/~jdoe/. "
+            "Artifact: https://anonymous.4open.science/r/tool-1234 and github.com/anonymous-authors/tool.")
+    f = {x[0]: x for x in check_anonymity(struct(["Introduction"]), text, None, NO_META, [], RULES)}
+    assert f["identifying_link"][3]["links"] == ["https://github.com/janedoe", "jane.github.io",
+                                                 "http://cs.uni.edu/~jdoe"]
+
+
+def test_owner_links_in_the_reference_list_are_not_flagged():
+    s = {"sections": [{"heading": "Introduction", "text": "We use the tool."},
+                      {"heading": "References", "text": "[1] B. Other, Tool, https://github.com/bother/tool"}]}
+    text = "We use the tool.\nReferences\n[1] B. Other, Tool, https://github.com/bother/tool"
+    assert "identifying_link" not in codes(check_anonymity(s, text, None, NO_META, [], RULES))

@@ -1,7 +1,7 @@
 """SQLite store. signal, decision and audit_log are append-only (enforced by triggers)."""
 import json
 import sqlite3
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 SCHEMA = """
