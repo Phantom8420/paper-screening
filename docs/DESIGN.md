@@ -124,7 +124,7 @@ audit_log(id, ts, actor, action, entity, entity_id, payload_json) -- append-only
 | M1 | Intake and format segregation, conversion | zip or files go in; each paper gets a format queue, text, sections and PDF, or a "needs manual look" signal with the reason; tests |
 | M2 | Compliance checks | page limit, required sections, abstract/keywords, anonymization (body and file metadata), IEEE template markers |
 | M3 | Reference verification | paper-preflight wrapped behind one function (swap engines there); cache; flags for unresolvable, mismatched, uncited, undefined keys, retracted, unverifiable; numeric [n] check for Word |
-| M4 | Similarity (local) | shingle/MinHash index of the pool and past proceedings; references and quotes excluded; per-source breakdown; provider interface |
+| M4 | Similarity (local) | **started:** duplicate and overlapping submissions across the database (5-word phrase index, references excluded, boilerplate ignored, shared passages as evidence). Still to do: shingle/MinHash index of the pool and past proceedings; references and quotes excluded; per-source breakdown; provider interface |
 | M5 | Quality signals | tortured phrases, scope match (once themes are supplied), code/data availability statements, basic figure reuse (perceptual hash) |
 | M6 | Scoring, triage, review UI | strength tier with sub-scores, triage labels with thresholds you set, queue sorted by risk, evidence view, decisions, overrides, appeals, audit |
 | M7 | Reports and interop | author feedback reports, CSV import/export (columns taken from a real export from your submission system), ORCID, chair dashboard, PDF integrity report |

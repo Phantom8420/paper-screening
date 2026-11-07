@@ -238,7 +238,8 @@ def test_cli_ingest_runs_every_check_in_parallel(tmp_path, capsys):
     assert "converted and checked: 3/3" in out.err
     con = connect(data / "screening.db")
     runs = con.execute("SELECT check_name, count(*) FROM check_run GROUP BY check_name").fetchall()
-    assert {r[0]: r[1] for r in runs} == {"intake": 3, "conversion": 3, "compliance": 3, "references": 3}
+    assert {r[0]: r[1] for r in runs} == {"intake": 3, "conversion": 3, "compliance": 3, "references": 3,
+                                             "duplicates": 3}
 
 
 def test_cli_check_resumes_an_interrupted_ingest_and_tallies_flags(tmp_path, capsys):

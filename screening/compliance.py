@@ -38,6 +38,8 @@ DEFAULT_RULES = {  # IEEE conference defaults; override any key with a TOML file
     },
     # web/wayback would contact authors' own servers; s2 has its own licence terms
     "references": {"online": True, "disabled_sources": ["web", "wayback", "s2"]},
+    # share of the shorter paper's text (references excluded) also found in another paper in the database
+    "duplicates": {"warn_overlap": 0.3, "fail_overlap": 0.7},
 }
 OPTIONAL_SOURCES = {"s2", "openlibrary", "github", "pypi", "cran", "huggingface", "openml", "web", "wayback"}
 MAX_TEXT = 2_000_000  # chars of extracted text scanned; bounds every regex below

@@ -6,7 +6,8 @@ from pathlib import Path
 
 from .compliance import run_compliance
 from .convert import convert_paper
-from .db import connect
+from .db import add_signal, connect, start_run
+from .duplicates import run_duplicates
 from .references import run_references
 
 
@@ -41,6 +42,7 @@ def process(data: Path, ids, rules, jobs=1, convert=True):
             for n, f in enumerate(as_completed(futures), 1):
                 f.result()  # both steps record their own failures; anything raised here is a real bug
                 _progress(what, n, len(ids))
+    _duplicates(db, ids, rules)
     if not online:
         return
     if ids and not os.environ.get("PAPER_PREFLIGHT_EMAIL"):
@@ -51,6 +53,28 @@ def process(data: Path, ids, rules, jobs=1, convert=True):
         run_references(con, pid, data, rules)
         _progress("references", n, len(ids))
     con.close()
+
+
+def _duplicates(db, ids, rules):
+    """Needs every paper's text, so it runs once per batch after the workers."""
+    if not ids:
+        return
+    con = connect(db)
+    try:
+        n = len(run_duplicates(con, ids, rules))
+        _progress("compared for duplicates", n, n)
+    except Exception as e:  # noqa: BLE001  one bad paper must not stop the batch; every paper gets the flag
+        error = f"{type(e).__name__}: {str(e)[:500]}"
+        try:
+            con.rollback()
+            for pid in ids:
+                add_signal(con, start_run(con, pid, "duplicates"), "duplicates_crashed", "fail",
+                           "The duplicate check stopped with an unexpected error.", {"error": error})
+            con.commit()
+        except Exception:  # noqa: BLE001  e.g. the database itself is locked or full; say so and go on
+            print(f"duplicate check failed and could not be recorded: {error}", file=sys.stderr)
+    finally:
+        con.close()
 
 
 def _progress(what, n, total):
