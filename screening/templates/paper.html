@@ -1,104 +1,91 @@
 {% extends "base.html" %}
-{% block title %}{{ p.external_id or "#" ~ p.id }} · Screening{% endblock %}
-{% block crumb %}
-<nav class="crumb"><a href="/">Queue</a><span aria-hidden="true">/</span><strong>{{ p.external_id or "#" ~ p.id }}</strong></nav>
-{% endblock %}
-{% block actions %}
-<a class="btn sm" href="{{ '/paper/%d' % prev if prev else '#' }}" aria-disabled="{{ 'false' if prev else 'true' }}"><kbd>k</kbd> Previous</a>
-<a class="btn sm" href="{{ '/paper/%d' % next if next else '#' }}" aria-disabled="{{ 'false' if next else 'true' }}">Next <kbd>j</kbd></a>
+{% set ref = p.external_id or "#" ~ p.id %}
+{% block title %}{{ ref }} · Screening{% endblock %}
+{% block bar %}
+<a href="{{ '/paper/%d' % prev if prev else '#' }}" aria-disabled="{{ 'false' if prev else 'true' }}" title="Previous paper (k)"><svg class="ic" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg><span class="hide-sm">Previous</span></a>
+<span class="title">{{ ref }}: {{ p.title or "Untitled submission" }}</span>
+<a href="{{ '/paper/%d' % next if next else '#' }}" aria-disabled="{{ 'false' if next else 'true' }}" title="Next paper (j)"><span class="hide-sm">Next</span><svg class="ic" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></a>
 {% endblock %}
 {% block body %}
-<main class="work">
-  <section class="viewer" aria-label="Paper PDF">
-    {% if has_pdf %}
-    <iframe id="pdf" title="Paper PDF" src="/paper/{{ p.id }}/pdf#view=FitH"></iframe>
-    {% else %}
-    <div class="none"><strong>No PDF to show</strong>This paper has no built PDF, usually because its sources did not compile. The flags on the right still apply.</div>
-    {% endif %}
-  </section>
+<main class="ed">
+  <nav class="rail" aria-label="Panels">
+    <a href="/" title="Back to papers (u)"><svg class="ic" viewBox="0 0 24 24"><path d="M3 10l9-7 9 7v10a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z"/></svg></a>
+    <a href="?tab=flags" class="{{ 'on' if tab == 'flags' }}" title="Flags"><svg class="ic" viewBox="0 0 24 24"><path d="M5 21V4h11l-2 4 2 4H5"/></svg>
+      {% if open %}<span class="badge {{ '' if fails else 'warn' }}">{{ open|length }}</span>{% endif %}</a>
+    <a href="?tab=notice" class="{{ 'on' if tab == 'notice' }}" title="Notice draft"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg></a>
+    <a href="?tab=history" class="{{ 'on' if tab == 'history' }}" title="History"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></a>
+  </nav>
 
-  <section class="side">
-    <div class="head">
-      <h1>{{ p.title or "Untitled submission" }}</h1>
+  <section class="panel">
+    <div class="ph">
+      <h1>{{ {"flags": "Flags", "notice": "Notice draft", "history": "History"}.get(tab, "Flags") }}</h1>
       <div class="meta">
-        <span class="tag plain">{{ {"latex": "LaTeX", "word": "Word"}.get(p.format, "Unknown format") }}</span>
-        {% if p.page_count %}<span class="tag plain">{{ p.page_count }} pages</span>{% endif %}
+        {% if fails %}<span class="pill fail">{{ fails }} required</span>{% endif %}
+        {% if warns %}<span class="pill warn">{{ warns }} to check</span>{% endif %}
+        {% if not open %}<span class="pill ok">Clear</span>{% endif %}
+        {% if dismissed %}<span class="pill plain">{{ dismissed|length }} dismissed</span>{% endif %}
+        <span class="pill plain">{{ {"latex": "LaTeX", "word": "Word"}.get(p.format, "Unknown format") }}{% if p.page_count %}, {{ p.page_count }} pages{% endif %}</span>
       </div>
     </div>
 
-    <div class="verdict {{ tier }}">
-      {% if tier == "ok" %}
-      <div class="n">✓</div><p><strong>No open flags</strong>Ready to send to review.</p>
-      {% else %}
-      <div class="n">{{ open|length }}</div>
-      <p><strong>{{ "%d required fix%s" % (fails, "" if fails == 1 else "es") if fails else "Warnings only" }}</strong>
-        {{ warns }} worth a look{% if dismissed %}, {{ dismissed|length }} dismissed{% endif %}</p>
-      {% endif %}
-    </div>
-
-    <nav class="tabs">
-      <a href="?tab=flags" class="{{ 'on' if tab == 'flags' }}">Flags <span>{{ open|length }}</span></a>
-      <a href="?tab=notice" class="{{ 'on' if tab == 'notice' }}">Notice draft</a>
-      <a href="?tab=history" class="{{ 'on' if tab == 'history' }}">History <span>{{ history|length }}</span></a>
-    </nav>
-
-    <div class="scroll">
+    <div class="pbody">
     {% if tab == "notice" %}
       {% if draft %}
-      <p class="sub">Nothing is sent from here. Copy it, edit it, and send it from your conference system.</p>
+      <p class="note">Nothing is sent from here. Copy it, edit it, and send it from your submission system.</p>
       <div class="draft" id="draft">{{ draft }}</div>
-      <div><button class="btn sm" type="button" onclick="navigator.clipboard.writeText(document.getElementById('draft').innerText).then(() => this.textContent = 'Copied')">Copy notice</button></div>
+      <div><button class="btn sm green" type="button" onclick="navigator.clipboard.writeText(document.getElementById('draft').innerText).then(() => this.textContent = 'Copied')">Copy notice</button></div>
       {% else %}
-      <div class="ok-state"><strong>No notice needed</strong>None of the open flags are things the authors have to fix.</div>
+      <div class="clear"><strong>No notice needed</strong>None of the open flags are for the authors to fix.</div>
       {% endif %}
 
     {% elif tab == "history" %}
       {% if history %}
       <div class="log">
         {% for h in history %}
-        <div><span><b>{{ h.actor }}</b> {{ "dismissed" if h.action == "dismiss" else "restored" if h.action == "restore" else h.action }} {{ label(h.pl.code or "") }}</span><time>{{ h.ts[:16].replace("T", " ") }}</time>
+        <div><time>{{ h.ts[:16].replace("T", " ") }}</time><b>{{ h.actor }}</b> {{ "dismissed" if h.action == "dismiss" else "restored" if h.action == "restore" else h.action }} {{ label(h.pl.code or "") }}
           {% if h.pl.reason %}<p>“{{ h.pl.reason }}”</p>{% endif %}</div>
         {% endfor %}
       </div>
       {% else %}
-      <div class="ok-state"><strong>No decisions yet</strong>Dismissals and restores show up here with who made them and why.</div>
+      <div class="clear"><strong>No decisions yet</strong>Dismissals and restores show up here with who made them and why.</div>
       {% endif %}
 
     {% else %}
       {% for it in items %}{% set s = it.s %}
-      <article class="flag {{ s.severity }}">
-        <div class="top"><h3>{{ label(s.code) }}</h3><span class="tag {{ s.severity }}">{{ "Required" if s.severity == "fail" else "Worth a look" }}</span></div>
-        <p class="msg">{{ s.message }}</p>
-        {% if it.ev %}<dl class="ev">{% for k, v in it.ev %}<div><dt>{{ k }}</dt><dd>{{ v }}</dd></div>{% endfor %}</dl>{% endif %}
-        {% if it.hint %}<p class="fix"><svg class="ic" viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg>{{ it.hint }}</p>{% endif %}
-        <div class="acts">
-          {% if it.page and has_pdf %}<button class="btn sm" type="button" onclick="goto({{ it.page }})">Show page {{ it.page }}</button>{% endif %}
-          <details class="why">
-            <summary class="btn sm ghost">Dismiss…</summary>
-            <form class="reason" method="post" action="/paper/{{ p.id }}/dismiss">
-              <input type="hidden" name="code" value="{{ s.code }}">
-              <input name="reason" required placeholder="Why is this not a problem?" aria-label="Reason for dismissing">
-              <button class="btn sm primary">Dismiss</button>
-            </form>
-          </details>
-          <span class="src">{{ s.check_name }}</span>
+      <article class="entry {{ s.severity }}">
+        <div class="eh"><strong>{{ label(s.code) }}</strong><span>{{ s.check_name }}{% if it.page %}, page {{ it.page }}{% endif %}</span></div>
+        <div class="eb">
+          <p>{{ s.message }}</p>
+          {% if it.ev %}<pre>{% for k, v in it.ev %}{{ k }}: <b>{{ v }}</b>{{ "\n" if not loop.last }}{% endfor %}</pre>{% endif %}
+          {% if it.hint %}<p class="fix"><strong>{{ "Required fix" if s.severity == "fail" else "Suggestion" }}:</strong> {{ it.hint }}</p>{% endif %}
+          <div class="acts">
+            {% if it.page and has_pdf %}<button class="btn sm" type="button" onclick="goto({{ it.page }})">Go to page {{ it.page }}</button>{% endif %}
+            <details class="why">
+              <summary class="btn sm link">Dismiss</summary>
+              <form class="reason" method="post" action="/paper/{{ p.id }}/dismiss">
+                <input type="hidden" name="code" value="{{ s.code }}">
+                <input name="reason" required placeholder="Why is this not a problem?" aria-label="Reason for dismissing">
+                <button class="btn sm green">Dismiss</button>
+              </form>
+            </details>
+          </div>
         </div>
       </article>
       {% else %}
-      <div class="ok-state"><strong>Nothing open</strong>Every check passed or its flag was dismissed.</div>
+      <div class="clear"><strong>No open flags</strong>Every check passed or its flag was dismissed.</div>
       {% endfor %}
 
       {% if gone %}
-      <p class="label">Dismissed, kept for the record</p>
+      <p class="sec">Dismissed, kept for the record</p>
       {% for g in gone %}
       <div class="gone">
         <span>{{ label(g.s.code) }}</span>
         <details class="why">
-          <summary class="btn sm">Restore…</summary>
+          <summary class="btn sm link">Restore</summary>
           <form class="reason" method="post" action="/paper/{{ p.id }}/restore">
             <input type="hidden" name="code" value="{{ g.s.code }}">
             <input name="reason" required placeholder="Why bring it back?" aria-label="Reason for restoring">
-            <button class="btn sm primary">Restore</button>
+            <button class="btn sm green">Restore</button>
           </form>
         </details>
       </div>
@@ -107,16 +94,29 @@
     {% endif %}
     </div>
   </section>
+
+  <section class="pdf" aria-label="Paper PDF">
+    <div class="pt">
+      <span class="count">{{ ref }}{% if p.page_count %}, {{ p.page_count }} pages{% endif %}</span>
+      <span class="sp"></span>
+      {% if has_pdf %}<a class="btn sm" href="/paper/{{ p.id }}/pdf" download>Download PDF</a>{% endif %}
+    </div>
+    {% if has_pdf %}
+    <iframe id="pdf" title="Paper PDF" src="/paper/{{ p.id }}/pdf#view=FitH"></iframe>
+    {% else %}
+    <div class="none"><strong>No PDF to show</strong>This paper has no built PDF, usually because its sources did not compile. The flags still apply.</div>
+    {% endif %}
+  </section>
 </main>
 {% endblock %}
 {% block script %}
 <script>
-  function goto(n) { const f = document.getElementById("pdf"); f.src = "/paper/{{ p.id }}/pdf#page=" + n + "&view=FitH"; }
+  function goto(n) { document.getElementById("pdf").src = "/paper/{{ p.id }}/pdf#page=" + n + "&view=FitH"; }
   addEventListener("keydown", e => {
     if (typing(e)) return;
     {% if prev %}if (e.key === "k") location = "/paper/{{ prev }}";{% endif %}
     {% if next %}if (e.key === "j") location = "/paper/{{ next }}";{% endif %}
-    if (e.key === "Escape" || e.key === "u") location = "/";
+    if (e.key === "u") location = "/";
   });
   document.querySelectorAll("details.why").forEach(d => d.addEventListener("toggle", () => d.open && d.querySelector("input[name=reason]").focus()));
 </script>

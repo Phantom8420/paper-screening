@@ -1,86 +1,64 @@
 {% extends "base.html" %}
-{% block title %}Review queue{% endblock %}
-{% block actions %}<a class="btn sm" href="/export.csv">Export CSV</a>{% endblock %}
+{% set filters = (("todo", "To decide"), ("fail", "Failed a check"), ("look", "Worth a look"), ("ok", "All clear"), ("all", "All papers")) %}
+{% block title %}Papers · Screening{% endblock %}
 {% block body %}
-<main class="page">
-  <div class="hero">
-    <div>
-      {% if counts.todo %}
-      <h1>{{ counts.todo }} of {{ total }} papers need you</h1>
-      <p>Riskiest first. Every flag shows what it found and can be dismissed with a reason; nothing is decided until you decide it.</p>
-      {% elif total %}
-      <h1>All {{ total }} papers are clear</h1>
-      <p>No open flags. Dismissed flags stay on each paper's page with the reason you gave.</p>
-      {% else %}
-      <h1>No papers yet</h1>
-      <p>Ingest a batch with <code>python -m screening ingest</code>, then run the checks.</p>
-      {% endif %}
-    </div>
-    {% if total %}
-    <div class="meter" aria-label="Breakdown">
-      <div class="track">
-        {% for t, c in (("fail", "--fail"), ("look", "--look"), ("ok", "--ok")) %}{% if counts[t] %}<i style="width:{{ 100 * counts[t] / total }}%;background:var({{ c }})"></i>{% endif %}{% endfor %}
-      </div>
-      <div class="legend">
-        <span><i class="dot" style="color:var(--fail)"></i><b>{{ counts.fail }}</b> failed</span>
-        <span><i class="dot" style="color:var(--look)"></i><b>{{ counts.look }}</b> worth a look</span>
-        <span><i class="dot" style="color:var(--ok)"></i><b>{{ counts.ok }}</b> clear</span>
-      </div>
-    </div>
-    {% endif %}
-  </div>
-
-  <nav class="seg" aria-label="Filter">
-    {% for key, name in (("todo", "To decide"), ("fail", "Failed a check"), ("look", "Worth a look"), ("ok", "All clear"), ("all", "All")) %}
-    <a href="/?show={{ key }}" class="{{ 'on' if show == key }}">{{ name }} <b>{{ total if key == 'all' else counts[key] }}</b></a>
+<div class="dash">
+  <nav class="nav" aria-label="Filter papers">
+    <a class="btn green" href="/export.csv">Export CSV</a>
+    {% for key, name in filters %}
+    <a class="f {{ 'on' if show == key }}" href="/?show={{ key }}">{{ name }} <span>{{ total if key == "all" else counts[key] }}</span></a>
     {% endfor %}
+    <p class="foot">Checks only recommend. Nothing is decided until you decide it.</p>
   </nav>
 
-  <div class="panel">
+  <main class="list">
+    <h1>{{ dict(filters)[show] if show in dict(filters) else "Papers" }}</h1>
+    {% if total %}
+    <label class="search"><svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>
+      <input id="q" type="search" placeholder="Search by title, ID or flag" aria-label="Search papers"></label>
+    {% endif %}
     {% if rows %}
     <table>
-      <thead><tr><th>Paper</th><th class="flg-col">Open flags</th><th>Risk</th></tr></thead>
+      <thead><tr><th>Title</th><th class="hide-sm">Open flags</th><th class="hide-sm">Pages</th><th>Status</th></tr></thead>
       <tbody>
       {% for r in rows %}
-        <tr data-href="/paper/{{ r.p.id }}" class="{{ 'cur' if loop.first }}">
-          <td><a class="ptitle" href="/paper/{{ r.p.id }}">
-            <span class="ft {{ r.p.format }}">{{ {"latex": "TEX", "word": "DOC"}.get(r.p.format, "?") }}</span>
-            <span><strong>{{ r.p.title or "Untitled" }}</strong><span>{{ r.p.external_id or "#" ~ r.p.id }}{% if r.p.page_count %}, {{ r.p.page_count }} pages{% endif %}</span></span>
-          </a></td>
-          <td class="flg-col"><div class="flg">
-            {% for s in r.open[:4] %}<span class="tag {{ s.severity }}">{{ label(s.code) }}</span>{% endfor %}
-            {% if r.open|length > 4 %}<span class="tag plain">+{{ r.open|length - 4 }} more</span>{% endif %}
-            {% if not r.open %}<span class="tag ok">Clear</span>{% endif %}
-            {% if r.dismissed %}<span class="tag plain">{{ r.dismissed|length }} dismissed</span>{% endif %}
+        <tr data-href="/paper/{{ r.p.id }}" data-q="{{ (r.p.title or '') ~ ' ' ~ (r.p.external_id or '') ~ ' ' ~ r.open|map(attribute='code')|join(' ') }}">
+          <td class="t"><a href="/paper/{{ r.p.id }}">{{ r.p.title or "Untitled" }}</a>
+            <small>{{ r.p.external_id or "#" ~ r.p.id }} · {{ {"latex": "LaTeX", "word": "Word"}.get(r.p.format, "Unknown format") }}</small></td>
+          <td class="hide-sm"><div class="flg">
+            {% for s in r.open[:3] %}<span class="pill {{ s.severity }}">{{ label(s.code) }}</span>{% endfor %}
+            {% if r.open|length > 3 %}<span class="pill plain">+{{ r.open|length - 3 }}</span>{% endif %}
+            {% if r.dismissed %}<span class="pill plain">{{ r.dismissed|length }} dismissed</span>{% endif %}
           </div></td>
-          <td><div class="risk">
-            {% set w = [100, 50 * r.fails + 18 * r.warns]|min %}
-            <div class="t"><i style="width:{{ w }}%;background:var(--{{ 'fail' if r.fails else 'look' if r.warns else 'ok' }})"></i></div>
-            {{ "High" if r.fails else "Medium" if r.warns else "None" }}
-          </div></td>
+          <td class="n hide-sm">{{ r.p.page_count or "–" }}</td>
+          <td class="n">{% if r.fails %}<span class="pill fail">{{ r.fails }} required</span>{% elif r.warns %}<span class="pill warn">{{ r.warns }} to check</span>{% else %}<span class="pill ok">Clear</span>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
-    {% else %}
+    <p class="keys"><kbd>j</kbd> <kbd>k</kbd> move, <kbd>Enter</kbd> open, <kbd>/</kbd> search</p>
+    {% elif total %}
     <div class="empty"><strong>Nothing here</strong>{% if show == "todo" %}Every paper is clear or has had its flags dismissed.{% else %}No papers match this filter.{% endif %}</div>
+    {% else %}
+    <div class="empty"><strong>No papers yet</strong>Ingest a batch with <code>python -m screening ingest</code>; it shows up here once checked.</div>
     {% endif %}
-  </div>
-  {% if rows %}<div class="hint"><span><kbd>j</kbd> <kbd>k</kbd> move</span><span><kbd>Enter</kbd> open</span></div>{% endif %}
-</main>
+  </main>
+</div>
 {% endblock %}
 {% block script %}
 <script>
-  const rows = [...document.querySelectorAll("tbody tr")];
+  const all = [...document.querySelectorAll("tbody tr")], q = document.getElementById("q");
   let i = 0;
-  rows.forEach((r, n) => r.addEventListener("click", e => { if (!e.target.closest("a")) location = r.dataset.href; }));
+  const vis = () => all.filter(r => !r.hidden);
+  const mark = n => { all.forEach(r => r.classList.remove("cur")); const v = vis(); i = Math.max(0, Math.min(v.length - 1, n)); v[i]?.classList.add("cur"); v[i]?.scrollIntoView({ block: "nearest" }); };
+  all.forEach(r => r.addEventListener("click", e => { if (!e.target.closest("a")) location = r.dataset.href; }));
+  q?.addEventListener("input", () => { const t = q.value.toLowerCase().replaceAll(" ", "_"); all.forEach(r => r.hidden = !r.dataset.q.toLowerCase().replaceAll(" ", "_").includes(t)); mark(0); });
   addEventListener("keydown", e => {
-    if (typing(e) || !rows.length) return;
-    if (e.key === "j" || e.key === "k") {
-      rows[i].classList.remove("cur");
-      i = Math.max(0, Math.min(rows.length - 1, i + (e.key === "j" ? 1 : -1)));
-      rows[i].classList.add("cur"); rows[i].scrollIntoView({ block: "nearest" });
-    } else if (e.key === "Enter") location = rows[i].dataset.href;
+    if (e.key === "/" && !typing(e) && q) { e.preventDefault(); q.focus(); return; }
+    if (typing(e) && e.key !== "Enter") return;
+    if (e.key === "j" || e.key === "k") mark(i + (e.key === "j" ? 1 : -1));
+    else if (e.key === "Enter" && vis()[i]) location = vis()[i].dataset.href;
   });
+  if (all.length) mark(0);
 </script>
 {% endblock %}
