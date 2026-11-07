@@ -1,7 +1,7 @@
 """SQLite store. signal, decision and audit_log are append-only (enforced by triggers)."""
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 
 SCHEMA = """
@@ -58,12 +58,12 @@ CREATE INDEX IF NOT EXISTS ix_decision_paper ON decision(paper_id);
 
 
 def now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def connect(path: str | Path) -> sqlite3.Connection:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(path)
+    con = sqlite3.connect(path, timeout=60)  # parallel workers wait for each other's short writes
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys=ON")
     con.execute("PRAGMA journal_mode=WAL")

@@ -4,7 +4,7 @@ Organizer-side screening for conference submissions in LaTeX and Word. It runs t
 objective checks, links every flag to its evidence and keeps a full decision log.
 It recommends; people decide. Design: [docs/DESIGN.md](docs/DESIGN.md).
 
-**Status:** M1 (intake, format routing, conversion) and M2 (format and compliance checks). The other checks follow the milestones in the design doc.
+**Status:** M1 (intake, format routing, conversion), M2 (format and compliance checks) and M3 (reference verification). The other checks follow the milestones in the design doc.
 
 Compliance rules default to an IEEE conference (6 body pages + 2, double-blind). Override any of them with `--rules my_rules.toml`, e.g.
 
@@ -17,7 +17,24 @@ max_total = 10
 double_blind = false
 ```
 
-`python -m screening check` re-runs the checks; earlier flags stay in the audit history and `status -v` shows only the latest run.
+`python -m screening check` re-runs the checks (and finishes converting any papers an interrupted ingest left behind); earlier flags stay in the audit history and `status -v` shows only the latest run. `--jobs N` sets how many papers are converted and checked at once (default: up to 4). `status` ends with a count of each flag across the batch.
+
+Measured on a laptop with a synthetic 300-paper batch (half LaTeX, half Word), offline: ingest and all checks in about 45 s, a re-check in about 20 s. Online lookups dominate a real run: roughly 10 to 30 s per paper depending on how many references resolve.
+
+### Reference checks
+
+[paper-preflight](https://pypi.org/project/paper-preflight/) checks every citation against the bibliography and looks each reference up in Crossref, dblp, arXiv, DataCite, OpenAlex, doi.org and PubMed, including retraction notices. Only reference metadata (title, authors, DOI) is sent, never the paper text. Word papers with numbered `[n]` citations also get a cited-vs-listed check. Flags: undefined citations, references not found or pointing to another work, retracted or withdrawn works, mismatched details, uncited entries and references that could not be verified (a person checks those).
+
+- `--offline` skips the lookups and only checks citations against the bibliography.
+- Set `PAPER_PREFLIGHT_EMAIL` to a contact address to use Crossref's faster "polite pool"; without it Crossref may rate-limit and the paper gets a `reference_check_incomplete` warning. `OPENALEX_API_KEY` is optional.
+- Lookups run one paper at a time (each paper's references are queried concurrently), to stay inside the indexes' rate limits.
+- Lookups are cached in `data/reference_cache.sqlite3`.
+- Sources that would contact authors' own servers (`web`, `wayback`) and Semantic Scholar (`s2`, separate licence) are off by default:
+
+```toml
+[references]
+disabled_sources = ["web", "wayback"]   # turns s2 back on
+```
 
 ## Run
 

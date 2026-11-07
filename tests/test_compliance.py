@@ -6,8 +6,16 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
 from screening.compliance import (
-    check_abstract, check_anonymity, check_page_size, check_pages, check_sections, check_template_latex,
-    docx_layout, docx_metadata, load_rules, run_compliance,
+    check_abstract,
+    check_anonymity,
+    check_page_size,
+    check_pages,
+    check_sections,
+    check_template_latex,
+    docx_layout,
+    docx_metadata,
+    load_rules,
+    run_compliance,
 )
 from screening.convert import convert_paper
 from screening.db import connect, current_signals
@@ -226,7 +234,8 @@ def test_word_end_to_end(tmp_path):
 
 def test_regexes_stay_linear_on_hostile_text():
     import time
-    from screening.compliance import EMAIL, REF_HEADING, ABSTRACT_LINE
+
+    from screening.compliance import ABSTRACT_LINE, EMAIL, REF_HEADING
     t0 = time.perf_counter()
     REF_HEADING.search("\n" * 50_000)
     ABSTRACT_LINE.search(" \n" * 50_000)

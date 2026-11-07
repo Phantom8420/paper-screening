@@ -3,6 +3,7 @@
 External tools run as subprocesses with timeouts. A missing tool or failed conversion
 becomes a signal and marks the paper "needs_manual"; nothing is dropped.
 """
+import functools
 import json
 import os
 import re
@@ -144,6 +145,11 @@ def extract_structure(path: Path, fmt: str, root: Path):
         return None, f"unexpected pandoc output: {e}"
 
 
+@functools.cache
+def _which(tool):
+    return shutil.which(tool)  # a PATH scan per paper cost ~17 s per 300 papers on Windows
+
+
 def _unavailable(tool, what):
     return ("converter_unavailable", "warn", f"{tool} is not installed here, so {what} was not produced.",
             {"tool": tool})
@@ -151,7 +157,7 @@ def _unavailable(tool, what):
 
 def soffice_convert(src: Path, outdir: Path, target: str):
     """LibreOffice headless conversion. Returns (path, problem)."""
-    exe = shutil.which("soffice") or shutil.which("libreoffice")
+    exe = _which("soffice") or _which("libreoffice")
     if not exe:
         return None, _unavailable("LibreOffice", f"a {target.upper()}")
     with tempfile.TemporaryDirectory() as profile:  # private profile avoids lock clashes
@@ -166,7 +172,7 @@ def soffice_convert(src: Path, outdir: Path, target: str):
 
 def compile_latex(root: Path, main: Path, outdir: Path):
     """latexmk in a throwaway copy, no shell escape, file access limited to the bundle."""
-    if not shutil.which("latexmk"):
+    if not _which("latexmk"):
         return None, _unavailable("LaTeX (latexmk)", "a PDF")
     rel = main.relative_to(root)
     env = {**os.environ, "openin_any": "p", "openout_any": "p", "shell_escape": "f"}
@@ -251,7 +257,7 @@ def _convert(con, paper_id: int, data_dir) -> str:
         text_path.write_text("\n\n".join(p for p in parts if p), encoding="utf-8")
 
     status = "needs_manual" if problems else "converted"
-    rel = lambda p: Path(p).relative_to(data_dir).as_posix() if p else None  # noqa: E731
+    rel = lambda p: Path(p).relative_to(data_dir).as_posix() if p else None
     con.execute(
         "UPDATE paper SET title=?, pdf_path=?, text_path=?, sections_json=?, page_count=?, status=? WHERE id=?",
         (struct and struct["title"], rel(pdf), rel(text_path), struct and json.dumps(struct), page_count,

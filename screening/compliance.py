@@ -36,7 +36,10 @@ DEFAULT_RULES = {  # IEEE conference defaults; override any key with a TOML file
         "max_negative_vspace": 10,
         "forbidden_latex_options": ["onecolumn", "draft", "draftcls", "9pt", "8pt"],
     },
+    # web/wayback would contact authors' own servers; s2 has its own licence terms
+    "references": {"online": True, "disabled_sources": ["web", "wayback", "s2"]},
 }
+OPTIONAL_SOURCES = {"s2", "openlibrary", "github", "pypi", "cran", "huggingface", "openml", "web", "wayback"}
 MAX_TEXT = 2_000_000  # chars of extracted text scanned; bounds every regex below
 MAX_PDF_PAGES = 200  # beyond this the page limit has already failed; skip text extraction
 MAX_XML = 20 * 2**20  # bytes read from any one part of a .docx (zip bombs)
@@ -100,6 +103,9 @@ def load_rules(path=None) -> dict:
                     rules[section][key] = value
     if bad := set(rules["template"]["paper_sizes"]) - PAPER_SIZES.keys():
         raise ValueError(f"unknown paper size(s): {', '.join(sorted(bad))}")
+    if bad := set(rules["references"]["disabled_sources"]) - OPTIONAL_SOURCES:
+        raise ValueError(f"references.disabled_sources: {', '.join(sorted(bad))} cannot be turned off "
+                         f"(optional sources: {', '.join(sorted(OPTIONAL_SOURCES))})")
     return rules
 
 

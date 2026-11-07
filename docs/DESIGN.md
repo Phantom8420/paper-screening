@@ -70,7 +70,7 @@ stored signals as features.
 | Web | FastAPI + Jinja2 templates (+ htmx) | the queue is server-rendered tables and forms, so no SPA build step |
 | Jobs | in-process worker thread | 300 papers do not need Celery or Redis |
 | Conversion | pandoc (`pypandoc_binary`), latexmk/TeX Live, LibreOffice headless | the formats require them; TeX and LibreOffice live in the Docker image |
-| Reference parsing | `.bib`/`.bbl` directly for LaTeX; GROBID (Docker) for Word/PDF | GROBID is the most accurate open reference parser |
+| Reference parsing | paper-preflight (parses .bib/.bbl/thebibliography and Word reference lists) | one engine for both formats; GROBID only if Word parsing proves too weak on real submissions |
 | PDF reading | `pypdf` | BSD licence. PyMuPDF is avoided because of AGPL |
 | Embeddings | sentence-transformers, small local model | scope match runs offline, so no abstract leaves the machine |
 | Tests | pytest | |
@@ -79,9 +79,9 @@ stored signals as features.
 
 | Tool | Use | Licence / terms | Data sent |
 |---|---|---|---|
-| [paper-preflight](https://pypi.org/project/paper-preflight/) | reference existence checks for .tex/.bib (Crossref, dblp, arXiv, DataCite, PubMed, OpenAlex) | MIT | reference metadata only |
+| [paper-preflight](https://pypi.org/project/paper-preflight/) 1.0.0 | **wrapped as the M3 engine**: citation/bibliography consistency and reference lookups (Crossref incl. retractions, dblp, arXiv, DataCite, PubMed, OpenAlex) for LaTeX and Word. We pin our own settings file (a submission cannot silence rules), refuse bundles whose include/bibliography paths leave the bundle (preflight does not confine them), and disable `web`, `wayback` (contact authors' servers) and `s2` by default | MIT | reference metadata only |
 | [CheckIfExist](https://arxiv.org/abs/2602.15871) (zabbonat/References-Validation) | **not wrapped**: it is a Node web app, not a library, and an independent comparison reported many false positives. Its design (multi-source consensus) informs ours | see repo | n/a |
-| GROBID | reference and header parsing for Word/PDF | Apache-2.0, self-hosted | nothing leaves the machine |
+| GROBID | not needed for now (preflight parses Word); fallback for PDF-only input | Apache-2.0, self-hosted | nothing leaves the machine |
 | pandoc | text and section extraction | GPL-2.0+, called as a separate program | local |
 | Crossref REST API | DOI/title lookup, retraction notices (Retraction Watch data is distributed by Crossref) | free; "polite pool" with a contact email; metadata largely without restrictions | reference metadata |
 | OpenAlex | title/DOI lookup | data CC0; **API key required since 2026-02-13**, free daily budget | reference metadata |
@@ -123,7 +123,7 @@ audit_log(id, ts, actor, action, entity, entity_id, payload_json) -- append-only
 | M0 | Design, scaffold, private repo | this document; repo on GitHub |
 | M1 | Intake and format segregation, conversion | zip or files go in; each paper gets a format queue, text, sections and PDF, or a "needs manual look" signal with the reason; tests |
 | M2 | Compliance checks | page limit, required sections, abstract/keywords, anonymization (body and file metadata), IEEE template markers |
-| M3 | Reference verification | parse via .bib/.bbl or GROBID; adapters for paper-preflight, Crossref, OpenAlex, dblp, S2; cache; flags for unresolvable, mismatched, uncited, undefined keys, retracted |
+| M3 | Reference verification | paper-preflight wrapped behind one function (swap engines there); cache; flags for unresolvable, mismatched, uncited, undefined keys, retracted, unverifiable; numeric [n] check for Word |
 | M4 | Similarity (local) | shingle/MinHash index of the pool and past proceedings; references and quotes excluded; per-source breakdown; provider interface |
 | M5 | Quality signals | tortured phrases, scope match (once themes are supplied), code/data availability statements, basic figure reuse (perceptual hash) |
 | M6 | Scoring, triage, review UI | strength tier with sub-scores, triage labels with thresholds you set, queue sorted by risk, evidence view, decisions, overrides, appeals, audit |
