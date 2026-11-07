@@ -23,6 +23,7 @@ from .sniff import sniff
 TIMEOUT = 180
 MAX_FLAT_CHARS = 5_000_000
 MAX_INCLUDES = 500
+MAX_LOG_BYTES = 5 * 2**20
 BLOCKS = {"Para", "Plain", "Header", "CodeBlock", "BlockQuote", "OrderedList", "BulletList",
           "Table", "Div", "LineBlock", "DefinitionList", "Figure"}
 INCLUDE = re.compile(r"\\(?:input|include)\s*\{([^}]+)\}")
@@ -130,6 +131,52 @@ def structure_from_ast(doc: dict) -> dict:
     }
 
 
+SMALL_CAPS = re.compile(r"\b([A-Z]) (?=[A-Z]{2,})")  # pypdf splits IEEE small caps: "I NTRODUCTION"
+PDF_HEADING = re.compile(r"([IVX]{1,6}|\d{1,2})\.\s+([A-Z].{1,80})")
+PDF_UNNUMBERED = re.compile(r"(?:references|bibliography|acknowledge?ments?)", re.I)
+ROMAN = {r: i for i, r in enumerate("I II III IV V VI VII VIII IX X XI XII XIII XIV XV".split(), 1)}
+PDF_ABSTRACT = re.compile(r"^[ \t]*abstract\b[ \t]*[—–\-:.]?[ \t]*", re.I | re.M)
+PDF_ABSTRACT_END = re.compile(r"^[ \t]*(?:index\s+terms|keywords|key\s*words)\b", re.I | re.M)
+
+
+def _unwrap_lines(s: str) -> str:
+    return re.sub(r"\s*\n\s*", " ", re.sub(r"(\w)-\n(\w)", r"\1\2", s)).strip()
+
+
+def structure_from_pdf(pdf: Path) -> dict | None:
+    """Fallback when pandoc cannot parse the source: headings from the compiled PDF's text. Numbered headings
+    must count up from 1 (I, II, ... or 1, 2, ... in capitals; gaps of up to two), so numbered list items in the text are not
+    taken for headings. Returns None unless at least two headings are found."""
+    reader = PdfReader(pdf)
+    lines = "\n".join((pg.extract_text() or "") for pg in reader.pages[:200]).splitlines()
+    sections, cur, want = [], {"heading": None, "level": 1, "text": ""}, 1
+    for ln in lines:
+        flat = SMALL_CAPS.sub(r"\1", ln.strip())
+        m = PDF_HEADING.fullmatch(flat)
+        num = m and (ROMAN.get(m.group(1)) or (int(m.group(1)) if m.group(1).isdigit() and m.group(2).isupper()
+                                                else None))
+        step = bool(num) and want <= num <= want + 2  # a heading wrapped over two lines is missed; allow a gap
+        if step or PDF_UNNUMBERED.fullmatch(flat):
+            sections.append(cur)
+            cur = {"heading": m.group(2).strip() if step else flat, "level": 1, "text": ""}
+            want = num + 1 if step else want
+        else:
+            cur["text"] += ln + "\n"
+    sections.append(cur)
+    if sum(1 for s in sections if s["heading"]) < 2:
+        return None
+    front = sections[0]["text"]
+    abstract = None
+    if m := PDF_ABSTRACT.search(front):
+        end = PDF_ABSTRACT_END.search(front, m.end())
+        abstract = _unwrap_lines(front[m.end():end.start() if end else None]) or None
+    for s in sections[1:]:
+        s["text"] = _unwrap_lines(s["text"])
+    title = next((ln.strip() for ln in lines if ln.strip()), None)
+    return {"authors": [], "title": title, "abstract": abstract, "keywords": None, "sections": sections,
+            "from_pdf": True}
+
+
 def extract_structure(path: Path, fmt: str, root: Path):
     """Return (structure, error)."""
     pandoc = pypandoc.get_pandoc_path()
@@ -206,9 +253,11 @@ def compile_latex(root: Path, main: Path, outdir: Path):
         ok, log = _run(["latexmk", "-norc", "-pdf", *bib, "-interaction=nonstopmode", "-halt-on-error",
                         "-no-shell-escape", "-file-line-error", rel.name], cwd=cwd, env=env)
         pdf = cwd / f"{rel.stem}.pdf"
-        if ok and pdf.exists():
-            return shutil.copy2(pdf, outdir / "paper.pdf"), None
         texlog = cwd / f"{rel.stem}.log"
+        if ok and pdf.exists():
+            if texlog.is_file():  # the reference check confirms "undefined citation" against what LaTeX saw
+                (outdir / "latex.log").write_bytes(texlog.read_bytes()[-MAX_LOG_BYTES:])
+            return shutil.copy2(pdf, outdir / "paper.pdf"), None
         lines = texlog.read_text(errors="replace").splitlines() if texlog.exists() else log.splitlines()
         errors = [ln for ln in lines if ln.startswith("!") or FILE_LINE_ERROR.match(ln) or "not found" in ln][:20]
         # a package the paper uses but this machine lacks is our problem, not the authors': never bounce it to them
@@ -267,6 +316,16 @@ def _convert(con, paper_id: int, data_dir) -> str:
     if problem:
         problems.append(problem)
 
+    if struct is None and pdf:
+        try:
+            struct = structure_from_pdf(pdf)
+        except Exception:  # noqa: BLE001  pypdf raises many types; the extraction failure is already recorded
+            struct = None
+        if struct:
+            problems = [p for p in problems if p[0] != "text_extraction_failed"]
+            problems.append(("text_from_pdf", "warn", "The source could not be parsed, so sections and text were "
+                             "read from the compiled PDF; headings may be less exact.", {}))
+
     page_count = None
     if pdf:
         try:
@@ -281,10 +340,10 @@ def _convert(con, paper_id: int, data_dir) -> str:
             f"{s['heading'] or ''}\n{s['text']}" for s in struct["sections"]]
         text_path.write_text("\n\n".join(p for p in parts if p), encoding="utf-8")
 
-    status = "needs_manual" if problems else "converted"
+    status = "needs_manual" if any(p[0] != "text_from_pdf" for p in problems) else "converted"
     rel = lambda p: Path(p).relative_to(data_dir).as_posix() if p else None
     con.execute(
-        "UPDATE paper SET title=?, pdf_path=?, text_path=?, sections_json=?, page_count=?, status=? WHERE id=?",
+        "UPDATE paper SET title=COALESCE(title, ?), pdf_path=?, text_path=?, sections_json=?, page_count=?, status=? WHERE id=?",
         (struct and struct["title"], rel(pdf), rel(text_path), struct and json.dumps(struct), page_count,
          status, paper_id),
     )

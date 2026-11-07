@@ -28,7 +28,7 @@ DEFAULT_RULES = {  # IEEE conference defaults; override any key with a TOML file
     "abstract": {"required": True, "max_words": 250, "keywords_required": True},
     "anonymization": {"double_blind": True},
     "template": {
-        "latex_class": "IEEEtran",
+        "latex_class": ["IEEEtran", "ieeeconf"],  # ieeeconf: IEEE's class for RAS conferences (ICRA, IROS)
         "latex_options": ["conference"],
         "paper_sizes": ["letter", "a4"],
         "word_columns": 2,
@@ -41,8 +41,11 @@ DEFAULT_RULES = {  # IEEE conference defaults; override any key with a TOML file
     # share of the shorter paper's text (references excluded) also found in another paper in the database
     # real ICC papers: unrelated pairs share under 2%; a paper and its extended version share 13%
     "duplicates": {"warn_overlap": 0.1, "fail_overlap": 0.7},
+    # final versions: authors must be shown, the copyright notice present, every font embedded (IEEE Xplore)
+    "camera_ready": {"enabled": False, "copyright_notice": True, "fonts_embedded": True},
 }
 OPTIONAL_SOURCES = {"s2", "openlibrary", "github", "pypi", "cran", "huggingface", "openml", "web", "wayback"}
+MIN_WORDS = 300  # shortest real paper text; an abstract alone is ~250 words
 MAX_TEXT = 2_000_000  # chars of extracted text scanned; bounds every regex below
 MAX_PDF_PAGES = 200  # beyond this the page limit has already failed; skip text extraction
 MAX_XML = 20 * 2**20  # bytes read from any one part of a .docx (zip bombs)
@@ -50,16 +53,17 @@ W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 SECTION_PATTERNS = {  # whole normalised heading must match; "Summary of results" is not a conclusion
     "introduction": r"introduction(?: and .+)?",
-    "conclusion": r"(?:.+ and )?conclusions?(?: and .+)?|concluding remarks",
+    "conclusion": r"(?:.+ and )?conclusions?(?: and .+)?|concluding remarks|summary",
     "references": r"references?|bibliography",
 }
 PAPER_SIZES = {"letter": (612.0, 792.0), "a4": (595.3, 841.9)}
 
 NUMBERING = re.compile(r"^[ \t]*(?:(?:[ivxlc]+|[a-z])[.)]|\d+(?:\.\d+)*[.)]?)\s+", re.I)
-REF_HEADING = re.compile(r"^[ \t]*(?:[IVXLC]+\.|\d+\.?)?[ \t]*(?:references|bibliography)[ \t]*$", re.I | re.M)
+REF_HEADING = re.compile(r"^[ \t]*(?:[IVXLC]+\.|\d+\.?)?[ \t]*(?:references|bibliography)[ \t]*:?[ \t]*$", re.I | re.M)
 BIB_SRC = re.compile(r"\\(?:bibliography|printbibliography)\b|\\begin\{thebibliography\}")
 # text.txt holds one paragraph per line (pandoc AST, no wrapping), so (.+) is the whole abstract paragraph
 ABSTRACT_LINE = re.compile(r"^[ \t]*abstract[ \t]*[—–\-:.][ \t]*(.+)", re.I | re.M)
+ABSTRACT_ALONE = re.compile(r"^[ \t]*abstract[ \t]*[:.]?[ \t]*\n\s*(\S.{40,})", re.I | re.M)
 KEYWORDS = re.compile(r"^[ \t]*(?:keywords|key\s*words|index\s+terms)\b", re.I | re.M)
 KEYWORDS_SRC = re.compile(r"\\begin\{IEEEkeywords\}|\\keywords\s*\{")
 EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]{1,64}@[\w-]{1,63}(?:\.[\w-]{1,63}){1,8}")  # guard keeps it linear
@@ -221,7 +225,7 @@ def _abstract(struct, text):
     for s in struct.get("sections", []):
         if s.get("heading") and _norm(s["heading"]) == "abstract":
             return s["text"].strip() or None
-    m = ABSTRACT_LINE.search(text)
+    m = ABSTRACT_LINE.search(text) or ABSTRACT_ALONE.search(text)  # Word: "ABSTRACT" as its own paragraph
     return m.group(1).strip() if m else None
 
 
@@ -287,9 +291,11 @@ def check_anonymity(struct, text, latex_src, file_meta, author_names, rules) -> 
 
     sections = struct.get("sections", [])
     front = sections[0]["text"] if sections and not sections[0].get("heading") else ""
-    if m := ABSTRACT_LINE.search(front):
+    if m := ABSTRACT_LINE.search(front) or ABSTRACT_ALONE.search(front):
         front = front[:m.start()]
-    front_hits = [ln.strip() for ln in front.splitlines() if EMAIL.search(ln) or AFFILIATION.search(ln)]
+    # author blocks are short lines; a body paragraph that mentions a university department is not one
+    front_hits = [ln.strip() for ln in front.splitlines()
+                  if len(ln.strip()) <= 160 and (EMAIL.search(ln) or AFFILIATION.search(ln))]
     if front_hits:
         out.append(_f("affiliation_in_front_matter", "fail",
                       "Lines before the abstract look like an author block (email or affiliation).",
@@ -343,6 +349,30 @@ def check_anonymity(struct, text, latex_src, file_meta, author_names, rules) -> 
 
 
 def _zread(z, part) -> bytes:
+    return to_transitional(_zread_raw(z, part))
+
+
+# Word's "Strict Open XML" save option names the same elements under purl.oclc.org URIs
+STRICT_NS = re.compile(rb"http://purl\.oclc\.org/ooxml/([A-Za-z]+)/")
+
+
+def to_transitional(xml: bytes) -> bytes:
+    return STRICT_NS.sub(rb"http://schemas.openxmlformats.org/\1/2006/", xml)
+
+
+def transitional_docx(src: Path, dst: Path) -> Path:
+    """src itself when it is already transitional, else a copy at dst with the XML parts renamed."""
+    with zipfile.ZipFile(src) as z:
+        if b"purl.oclc.org/ooxml" not in _zread_raw(z, "word/document.xml")[:4096]:
+            return src
+        with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as out:
+            for info in z.infolist():
+                data = _zread_raw(z, info.filename)
+                out.writestr(info.filename, to_transitional(data) if info.filename.endswith((".xml", ".rels")) else data)
+    return dst
+
+
+def _zread_raw(z, part) -> bytes:
     info = z.getinfo(part)
     if info.file_size > MAX_XML:
         raise ValueError(f"{part} is {info.file_size // 2**20} MB (limit {MAX_XML // 2**20} MB)")
@@ -373,14 +403,36 @@ def _line_of(src, pos):
     return src[start:end if end != -1 else None].strip()[:200]
 
 
+UNIT_PT = {"pt": 1, "bp": 1.00375, "pc": 12, "in": 72.27, "cm": 28.4528, "mm": 2.84528}
+COLUMNSEP_MIN_PT = 12  # IEEEtran's conference default (1pc); a wider gap leaves less room for text
+SHRINK = re.compile(r"\\addtolength\s*\{?\s*\\(?:textheight|textwidth)\s*\}?\s*\{\s*-")
+COLUMNSEP = re.compile(r"\\(?:setlength\s*\{?\s*\\columnsep\s*\}?\s*\{|addtolength\s*\{?\s*\\columnsep\s*\}?\s*\{"
+                       r"|columnsep\s*=?)\s*(-?[\d.]+)\s*(pt|bp|pc|in|cm|mm)")
+
+
+def _gives_up_space(src, pos) -> bool:
+    """Shrinking the text block or widening the column gap costs the authors space; only gains are flagged."""
+    s = src[pos:pos + 120]
+    if SHRINK.match(s):
+        return True
+    if m := COLUMNSEP.match(s):
+        try:
+            pt = float(m.group(1)) * UNIT_PT[m.group(2)]
+        except ValueError:
+            return False
+        return pt >= 0 if s.startswith("\\addtolength") else pt >= COLUMNSEP_MIN_PT
+    return False
+
+
 def check_template_latex(src, rules) -> list:
     t = rules["template"]
     out = []
     if m := DOCCLASS.search(src):
         cls = m.group(2).strip()
         opts = [o.strip() for o in (m.group(1) or "").split(",") if o.strip()]
-        if cls != t["latex_class"]:
-            out.append(_f("wrong_template", "fail", f"Uses document class {cls}; the template is {t['latex_class']}.",
+        classes = [t["latex_class"]] if isinstance(t["latex_class"], str) else t["latex_class"]
+        if cls not in classes:
+            out.append(_f("wrong_template", "fail", f"Uses document class {cls}; the template is {' or '.join(classes)}.",
                           {"line": m.group(0)}))
         else:
             missing = [o for o in t["latex_options"] if o not in opts]
@@ -392,7 +444,7 @@ def check_template_latex(src, rules) -> list:
                               f"Document class options differ from the template: {'; '.join(parts)}.",
                               {"line": m.group(0), "missing": missing, "forbidden": forbidden}))
     hacks = [{"issue": desc, "line": _line_of(src, hit.start())}
-             for rx, desc in LAYOUT_HACKS for hit in rx.finditer(src)]
+             for rx, desc in LAYOUT_HACKS for hit in rx.finditer(src) if not _gives_up_space(src, hit.start())]
     if hacks:
         out.append(_f("layout_modified", "fail", "The source changes the template's page layout.",
                       {"changes": hacks[:20]}))
@@ -402,7 +454,7 @@ def check_template_latex(src, rules) -> list:
                       f"{neg} negative \\vspace commands; space may have been squeezed to fit the page limit.",
                       {"count": neg, "threshold": t["max_negative_vspace"]}, neg))
     if _ok(out):
-        out.append(_f("template_ok", "info", f"Uses {t['latex_class']} without layout changes."))
+        out.append(_f("template_ok", "info", "Uses the template class without layout changes."))
     return out
 
 
@@ -417,9 +469,19 @@ def docx_layout(path: Path) -> dict:
     with zipfile.ZipFile(path) as z:
         doc = ET.fromstring(_zread(z, "word/document.xml"))
         styles = ET.fromstring(_zread(z, "word/styles.xml")) if "word/styles.xml" in z.namelist() else None
-    cols = doc.find(f"{W}body/{W}sectPr/{W}cols")
-    num = cols.get(f"{W}num") if cols is not None else None
-    columns = int(num) if num and num.isdigit() and len(num) <= 3 else 1
+    # a paragraph's sectPr ends a section; the body's own sectPr covers the rest. Take the section with
+    # the most text, so a one-column title block or a two-column snippet does not decide.
+    def ncols(sect):
+        num = sect.find(f"{W}cols").get(f"{W}num") if sect is not None and sect.find(f"{W}cols") is not None else None
+        return int(num) if num and num.isdigit() and len(num) <= 3 else 1
+    chars, size = Counter(), 0
+    for p in doc.iter(f"{W}p"):
+        size += sum(len(t.text or "") for t in p.iter(f"{W}t"))
+        if (sect := p.find(f"{W}pPr/{W}sectPr")) is not None:
+            chars[ncols(sect)] += size
+            size = 0
+    chars[ncols(doc.find(f"{W}body/{W}sectPr"))] += size
+    columns = chars.most_common(1)[0][0] if chars else 1
     default = None
     if styles is not None:
         normal = next((s for s in styles.iter(f"{W}style") if s.get(f"{W}styleId") == "Normal"), None)
@@ -470,7 +532,60 @@ def _pdf_facts(path):
     texts = [(p.extract_text() or "")[:MAX_TEXT] for p in pages] if n <= MAX_PDF_PAGES else [""] * n
     sizes = [(float(p.mediabox.width), float(p.mediabox.height)) for p in islice(pages, MAX_PDF_PAGES)]
     author = reader.metadata.author if reader.metadata else None
-    return texts, sizes, author
+    return texts, sizes, author, _unembedded_fonts(islice(pages, MAX_PDF_PAGES))
+
+
+def _unembedded_fonts(pages) -> list[str]:
+    """Fonts a page uses without carrying the font file. shortcut: fonts used only inside form XObjects
+    (some included figures) are not inspected; IEEE PDF eXpress is the final word on those."""
+    missing = set()
+    for page in pages:
+        fonts = (page.get("/Resources") or {}).get("/Font") or {}
+        for ref in fonts.values():
+            font = ref.get_object()
+            if font.get("/Subtype") == "/Type3":
+                continue  # glyphs are drawn in the PDF itself
+            desc = font
+            if font.get("/Subtype") == "/Type0":
+                desc = font["/DescendantFonts"][0].get_object()
+            desc = (desc.get("/FontDescriptor") or {})
+            desc = desc.get_object() if hasattr(desc, "get_object") else desc
+            if not any(k in desc for k in ("/FontFile", "/FontFile2", "/FontFile3")):
+                missing.add(str(font.get("/BaseFont", "unnamed")).lstrip("/"))
+    return sorted(missing)
+
+
+COPYRIGHT = re.compile(r"(?:©|\(c\)|copyright)\s*(?:19|20)\d\d\s+IEEE|97[89]-\d-\d{3,5}-\d{3,5}-\d"
+                       r"|\\IEEEpubid\b|\\copyrightnotice\b", re.I)
+REVIEW_LEFTOVER = re.compile(r"\banonymous\s+(?:authors?|submission)\b|\bpaper\s+id\s*[:#]?\s*\d+"
+                             r"|\bunder\s+review\b|\bdouble[- ]blind\s+review\b", re.I)
+
+
+def check_camera_ready(struct, first_page, latex_src, author_names, fonts, rules) -> list:
+    """The final version flips the anonymity rules: the authors must now be there, and match the system."""
+    r, out = rules["camera_ready"], []
+    if hits := _snippets(REVIEW_LEFTOVER, first_page):
+        out.append(_f("review_leftover", "fail", "The first page still reads like the anonymous review version.",
+                      {"snippets": hits}))
+    named = [a for a in struct.get("authors", []) if a.strip() and not PLACEHOLDER.fullmatch(a.strip())]
+    if latex_src:
+        named += [c for c in (_clean_tex(_braced(latex_src, m.end())) for m in AUTHOR_MACRO.finditer(latex_src))
+                  if c and not PLACEHOLDER.fullmatch(c)]
+    if author_names:
+        missing = [n for n in author_names if not ((rx := _name_rx(n)) and rx.search(first_page))]
+        if missing:
+            out.append(_f("author_list_mismatch", "warn", "Authors registered in the submission system are not "
+                          "on the first page; the published author list must match it.", {"names": missing[:20]}))
+    elif latex_src and not named:
+        out.append(_f("author_block_missing", "fail", "The final version shows no author names."))
+    if r["copyright_notice"] and not COPYRIGHT.search(first_page + "\n" + (latex_src or "")[:200_000]):
+        out.append(_f("copyright_notice_missing", "warn", "No IEEE copyright notice was found on the first page."))
+    if r["fonts_embedded"] and fonts:
+        out.append(_f("fonts_not_embedded", "fail", f"{len(fonts)} font(s) are not embedded in the PDF.",
+                      {"fonts": fonts[:20]}))
+    if _ok(out):
+        out.append(_f("camera_ready_ok", "info", "Authors, copyright notice and fonts look ready for publication."))
+    return out
 
 
 def _gather(con, paper_id, data_dir: Path, rules) -> list:
@@ -499,10 +614,11 @@ def _gather(con, paper_id, data_dir: Path, rules) -> list:
 
     file_meta = (docx and _stage(out, "docx_unreadable", "The Word file's metadata", docx_metadata, docx)) or {
         "people": [], "markup_authors": []}
+    texts, fonts = [], []
     if row["pdf_path"]:
         facts = _stage(out, "pdf_unreadable", "The PDF", _pdf_facts, data_dir / row["pdf_path"])
         if facts:
-            texts, sizes, author = facts
+            texts, sizes, author, fonts = facts
             out += check_pages(texts, rules)
             out += check_page_size(sizes, rules)
             if author:
@@ -513,11 +629,17 @@ def _gather(con, paper_id, data_dir: Path, rules) -> list:
     if struct is None:
         out.append(_f("structure_unavailable", "warn",
                       "The text could not be extracted, so section, abstract and text anonymity checks were skipped."))
+    elif len(text.split()) < MIN_WORDS:  # scanned pages, a lone figure, or the wrong file
+        out.append(_f("little_text", "fail", f"The paper has only {len(text.split())} words of readable text; it may be "
+                      "scanned images or the wrong file, so section and abstract checks were skipped.",
+                      {"words": len(text.split())}))
     else:
         out += check_sections(struct, text, latex_src, rules)
         out += check_abstract(struct, text, latex_src, rules)
     names = [r[0] for r in con.execute("SELECT name FROM author WHERE paper_id=? AND name IS NOT NULL", (paper_id,))]
     out += check_anonymity(struct or {}, text, latex_src, file_meta, names, rules)
+    if rules["camera_ready"]["enabled"]:
+        out += check_camera_ready(struct or {}, texts[0] if texts else text[:5000], latex_src, names, fonts, rules)
     if latex_src:
         out += check_template_latex(latex_src, rules)
     if docx and (layout := _stage(out, "docx_unreadable", "The Word file's layout", docx_layout, docx)):

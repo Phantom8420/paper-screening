@@ -48,6 +48,13 @@ FIX_HINTS = {
     "reference_mismatch": "Correct these references' details (title, authors, year or DOI disagree with the "
                           "published record).",
     "reference_uncited": "Cite these references in the text or remove them.",
+    "little_text": "Upload the paper as an editable Word or LaTeX file, not scanned pages or images.",
+    "review_leftover": "Replace the anonymous review header with the final author block.",
+    "author_list_mismatch": "Make the author list on the paper match the one in the submission system.",
+    "author_block_missing": "Add the author names and affiliations to the final version.",
+    "copyright_notice_missing": "Add the IEEE copyright notice from your copyright form to the first page.",
+    "fonts_not_embedded": "Embed all fonts (LaTeX: pdflatex embeds by default; Word: File > Options > Save > "
+                          "Embed fonts, or print to PDF with IEEE PDF eXpress).",
 }
 RISK = {"fail": 2, "warn": 1, "info": 0}
 
@@ -191,3 +198,29 @@ def export_csv(con, out, batch_id=None) -> int:
                         len(dismissed), "; ".join(f"{s['severity']}:{s['code']}" for s in open_),
                         "yes" if any(s["code"] in FIX_HINTS for s in open_) else "no"])
     return len(rows)
+
+
+def health(con, batch_id=None) -> dict:
+    """The whole conference at a glance: how many papers are clear, which problems are common, and how long
+    the papers run. Counts papers, not signals: one paper with five undefined citations counts once."""
+    rows = papers(con, batch_id)
+    tiers = {"fail": 0, "look": 0, "ok": 0}
+    by_code: dict[str, dict] = {}
+    pages: dict[int, int] = {}
+    formats: dict[str, int] = {}
+    dismissed = 0
+    for p in rows:
+        open_, gone = flags(con, p["id"])
+        dismissed += len(gone)
+        tiers["fail" if any(s["severity"] == "fail" for s in open_) else "look" if open_ else "ok"] += 1
+        for s in open_:
+            c = by_code.setdefault(s["code"], {"code": s["code"], "papers": 0, "severity": s["severity"],
+                                               "authors_can_fix": s["code"] in FIX_HINTS})
+            c["papers"] += 1
+            c["severity"] = max(c["severity"], s["severity"], key=RISK.get)
+        if p["page_count"]:
+            pages[p["page_count"]] = pages.get(p["page_count"], 0) + 1
+        formats[p["format"]] = formats.get(p["format"], 0) + 1
+    common = sorted(by_code.values(), key=lambda c: (-c["papers"], -RISK[c["severity"]], c["code"]))
+    return {"papers": len(rows), "tiers": tiers, "common": common, "pages": dict(sorted(pages.items())),
+            "formats": formats, "dismissed": dismissed}

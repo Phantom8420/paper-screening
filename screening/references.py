@@ -20,7 +20,7 @@ from pathlib import Path
 import paper_preflight
 from paper_preflight.tex import project as _pp_project
 
-from .compliance import SECTION_PATTERNS, _f, _norm, load_rules
+from .compliance import SECTION_PATTERNS, _f, _norm, load_rules, transitional_docx
 from .db import add_signal, audit, start_run
 from .sniff import sniff
 
@@ -219,6 +219,8 @@ def findings_from_report(report, root: Path | None = None) -> list:
         code, message, override = next(((c, msg, o) for c, rules, msg, o in GROUPS if f.rule in rules),
                                         (*HYGIENE, None))
         severity = override or SEVERITY.get(f.severity, "info")
+        if code == HYGIENE[0] and severity == "fail":
+            severity = "warn"  # a duplicate key or broken unused .bib entry does not change the paper reviewers see
         if code == "reference_uncited" and (f.file or "").lower().endswith(".bib"):
             severity = "info"  # BibTeX only prints cited entries, so an unused .bib entry is harmless
         file = f.file
@@ -261,6 +263,8 @@ def check_with_preflight(target: Path, main: Path | None, data_dir: Path, rules)
                 inline_bibliography(box, main)
             elif docx_size(target) > MAX_DOCX_BYTES:
                 raise TooLarge(f"the .docx expands beyond {MAX_DOCX_BYTES // 2**20} MB")
+            else:
+                target = transitional_docx(target, tmp / "paper.docx")  # preflight reads transitional only
         except TooLarge as e:
             return [_f("reference_input_too_large", "warn", "The bibliography input is too large to check "
                        "automatically; check the references by hand.", {"reason": str(e)})]
@@ -281,11 +285,33 @@ def check_with_preflight(target: Path, main: Path | None, data_dir: Path, rules)
     return out
 
 
+LATEX_UNDEFINED = re.compile(r"Citation [`']([^']{1,200})' (?:on page \d+ )?undefined")
+
+
+def confirm_undefined(findings: list, log: Path) -> list:
+    """The source scan also reads cites in unused macros and files never input; when the paper compiled,
+    keep only the undefined citations LaTeX itself reported. Without a log, keep every one."""
+    if not log.is_file():
+        return findings
+    text = re.sub(r"(?m)^(.{79})\n", r"\1", log.read_text(encoding="utf-8", errors="replace"))  # TeX wraps at 79
+    seen = set(LATEX_UNDEFINED.findall(text))
+    out = []
+    for code, severity, message, ev, score in findings:
+        if code == "reference_undefined":
+            items = [i for i in ev["items"] if i["rule"] != "CIT001" or i["key"] in seen]
+            if not items:
+                continue
+            message = f"{message.rsplit(' (', 1)[0]} ({len(items)})"
+            ev, score = {**ev, "items": items}, len(items)
+        out.append((code, severity, message, ev, score))
+    return out
+
+
 def _gather(row, data_dir: Path, rules) -> list:
     src = data_dir / row["source_dir"]
     main = src / row["main_file"]
     if row["format"] == "latex":
-        return check_with_preflight(src, main, data_dir, rules)
+        return confirm_undefined(check_with_preflight(src, main, data_dir, rules), src.parent / "derived" / "latex.log")
     out = []
     docx = main if sniff(main) == "docx" else src.parent / "derived" / f"{main.stem}.docx"
     if docx.exists():

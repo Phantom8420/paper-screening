@@ -1,4 +1,4 @@
-"""CLI: python -m screening ingest | check | status | dismiss | restore | notices | export  (-h on each)"""
+"""CLI: python -m screening ingest | import | check | status | report | dismiss | restore | notices | export  (-h on each)"""
 import argparse
 import getpass
 import os
@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .compliance import load_rules
 from .db import connect
+from .importer import import_export
 from .intake import ingest
 from .pipeline import process
 from .review import (
@@ -16,6 +17,7 @@ from .review import (
     dismiss,
     export_csv,
     flags,
+    health,
     notice,
     papers,
     restore,
@@ -32,12 +34,19 @@ def main(argv=None):
     p.add_argument("--name", help="batch name")
     p.add_argument("--rules", type=Path, help="TOML file overriding the default IEEE rules")
     p.add_argument("--no-convert", action="store_true")
+    p.add_argument("--meta", type=Path, help="EasyChair/HotCRP export (.xlsx, .csv or .json) with titles and authors")
+    m = sub.add_parser("import", help="attach titles and authors from an EasyChair/HotCRP export, then re-check")
+    m.add_argument("export", type=Path)
+    m.add_argument("--batch", type=int)
+    m.add_argument("--rules", type=Path)
     c = sub.add_parser("check", help="re-run all checks and list what changed (earlier flags stay in the log)")
     c.add_argument("--batch", type=int)
     c.add_argument("--rules", type=Path)
-    for q in (p, c):
+    for q in (p, c, m):
         q.add_argument("--offline", action="store_true",
                        help="check citations against the bibliography only; no reference lookups")
+        q.add_argument("--camera-ready", action="store_true",
+                       help="final versions: authors required, copyright notice, embedded fonts; no anonymity")
         q.add_argument("--jobs", type=int, default=min(4, os.cpu_count() or 1),
                        help="papers converted and checked at once (default %(default)s)")
     s = sub.add_parser("status", help="list papers and their open flags, with a count of each flag")
@@ -55,6 +64,8 @@ def main(argv=None):
     n.add_argument("--batch", type=int)
     n.add_argument("--out", type=Path, help="folder (default: <data>/notices)")
     n.add_argument("--force", action="store_true", help="replace drafts that already exist")
+    r = sub.add_parser("report", help="conference health: how many papers are clear and the most common problems")
+    r.add_argument("--batch", type=int)
     e = sub.add_parser("export", help="one CSV row per paper, for a spreadsheet or the submission system")
     e.add_argument("--batch", type=int)
     e.add_argument("--out", type=Path, default=Path("screening.csv"))
@@ -62,15 +73,23 @@ def main(argv=None):
     w.add_argument("--host", default="127.0.0.1", help="no login yet, so keep this local unless the network is trusted")
     w.add_argument("--port", type=int, default=8000)
     w.add_argument("--by", default=getpass.getuser(), help="name recorded on dismissals made in the UI")
+    w.add_argument("--authors", action="store_true",
+                   help="serve the author pre-check page instead: upload one paper, get the checklist, nothing kept")
+    w.add_argument("--rules", type=Path, help="TOML file overriding the default IEEE rules (--authors only)")
     args = ap.parse_args(argv)
 
     data = Path(args.data)
     if args.cmd == "serve":
         import uvicorn
         from .web import create_app
-        connect(data / "screening.db").close()
+        if args.authors:
+            from .web import create_author_app
+            app = create_author_app(load_rules(args.rules))
+        else:
+            connect(data / "screening.db").close()
+            app = create_app(data, args.by)
         print(f"Open http://{args.host}:{args.port} (Ctrl+C to stop)")
-        uvicorn.run(create_app(data, args.by), host=args.host, port=args.port, log_level="warning")
+        uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
         return
     con = connect(data / "screening.db")
     if args.cmd == "ingest":
@@ -78,7 +97,11 @@ def main(argv=None):
         if missing:
             ap.error(f"not found: {', '.join(map(str, missing))}")
         rules = _rules(args)
+        if args.meta and not args.meta.is_file():
+            ap.error(f"not found: {args.meta}")
         batch_id, ids = ingest(con, args.paths, data, args.name)
+        if args.meta:
+            _report_import(import_export(con, args.meta, batch_id))
         if not args.no_convert:
             process(data, ids, rules, args.jobs, convert=True)
         show_status(con, batch_id)
@@ -91,6 +114,14 @@ def main(argv=None):
         diff = changes(before, snapshot(con, ids))
         print(f"changes since the last check: {len(diff)} paper(s)" + ("" if diff else ", none"))
         print("\n".join(diff[:50]) + (f"\n  ... {len(diff) - 50} more" if len(diff) > 50 else ""), end="\n" if diff else "")
+    elif args.cmd == "import":
+        if not args.export.is_file():
+            ap.error(f"not found: {args.export}")
+        res = import_export(con, args.export, args.batch)
+        _report_import(res)
+        if res["matched"]:  # the anonymity check needs the new author names
+            process(data, res["matched"], _rules(args), args.jobs, convert=True)
+            show_status(con, args.batch)
     elif args.cmd == "status":
         show_status(con, args.batch, args.verbose, args.sort)
     elif args.cmd in ("dismiss", "restore"):
@@ -114,14 +145,34 @@ def main(argv=None):
                 written += 1
         print(f"{written} notice draft(s) in {out} (nothing was sent)"
               + (f"; {kept} existing draft(s) kept, --force to replace" if kept else ""))
+    elif args.cmd == "report":
+        h = health(con, args.batch)
+        t = h["tiers"]
+        print(f"{h['papers']} paper(s): {t['ok']} clear, {t['look']} worth a look, {t['fail']} failed a check;"
+              f" {h['dismissed']} flag(s) dismissed by chairs")
+        print("formats: " + ", ".join(f"{k} {v}" for k, v in h["formats"].items()))
+        print("pages:   " + ", ".join(f"{k}p x{v}" for k, v in h["pages"].items()))
+        print("most common problems (papers affected):")
+        for c in h["common"][:15]:
+            print(f"  {c['papers']:>4}  {c['severity']:<4}  {c['code']}" + ("  (authors can fix)" if c["authors_can_fix"] else ""))
     elif args.cmd == "export":
         print(f"{export_csv(con, args.out, args.batch)} paper(s) written to {args.out}")
+
+
+def _report_import(res):
+    print(f"{res['file']}: {res['records']} submission(s) in the export, {len(res['matched'])} paper(s) matched")
+    if res["unmatched"]:
+        shown = ", ".join(map(str, res["unmatched"][:10])) + (" ..." if len(res["unmatched"]) > 10 else "")
+        print(f"  no submission number matched: {shown}")
 
 
 def _rules(args):
     rules = load_rules(args.rules)
     if args.offline:
         rules["references"]["online"] = False
+    if args.camera_ready:
+        rules["anonymization"]["double_blind"] = False
+        rules["camera_ready"]["enabled"] = True
     return rules
 
 

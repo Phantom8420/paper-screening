@@ -158,3 +158,35 @@ def create_app(data: Path, actor: str) -> FastAPI:
                         headers={"Content-Disposition": 'attachment; filename="screening.csv"'})
 
     return app
+
+
+def create_author_app(rules) -> FastAPI:
+    """The public door: authors upload one paper and get the checklist. No queue, no stored papers, so this
+    one is safe to put on a reachable address, unlike the chair app."""
+    from fastapi import File, UploadFile
+
+    from .precheck import ACCEPTED, MAX_UPLOAD, precheck
+
+    app = FastAPI(title="Paper pre-check", docs_url=None, redoc_url=None)
+    app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
+    tpl = Jinja2Templates(directory=HERE / "templates")
+    tpl.env.globals.update(actor="", label=lambda c: c.replace("_", " ").capitalize())
+    ctx = {"accept": ",".join(ACCEPTED), "max_mb": MAX_UPLOAD // 2**20}
+
+    @app.get("/")
+    def form(request: Request):
+        return tpl.TemplateResponse(request, "author.html", {**ctx, "result": None, "error": None})
+
+    @app.post("/")
+    async def check(request: Request, paper: UploadFile = File(...)):
+        body = await paper.read(MAX_UPLOAD + 1)
+        try:
+            result = precheck(body, paper.filename or "", rules)
+        except ValueError as err:
+            return tpl.TemplateResponse(request, "author.html", {**ctx, "result": None, "error": str(err)}, 400)
+        for it in result["items"]:
+            it["ev"] = evidence_items(it["evidence"])
+        return tpl.TemplateResponse(request, "author.html", {**ctx, "result": result, "error": None,
+                                                            "filename": paper.filename})
+
+    return app

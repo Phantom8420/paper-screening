@@ -44,6 +44,9 @@ disabled_sources = ["web", "wayback"]   # turns s2 back on
 - `check` ends with what changed per paper since the last run (`+new_flag`, `-resolved_flag`), so a resubmitted batch shows at a glance who fixed what.
 - `notices` writes one plain-text fix request per paper into `data/notices/`, listing only problems the authors can fix (tool gaps and lookups that did not finish stay with the chairs), with the evidence. Nothing is sent.
 - Every paper is compared with every other paper in the database, across batches and tracks (references and acknowledgments left out, wording shared by many papers ignored). `duplicate_submission` (fail, 70%+ of the shorter paper's text also in another paper) and `overlapping_submission` (warn, 10%+; on real ICC papers unrelated pairs share under 2% and a paper and its extended version 13%) show the other paper, its batch and the shared passages. A fail needs both texts to be of comparable length (a paper whose text was only partly extracted gets a warning instead), and a paper ingested again under the same submission id counts as a revision, not a duplicate. Thresholds are in `[duplicates]` of the rules file. These flags are for chairs only and never go into author notices. 300 papers compare in about 2 s.
+- `import export.xlsx` reads the submission system's export (EasyChair .xlsx/.csv, HotCRP .json, or any CSV with a paper-number column), sets each paper's title and authors (matched by the number in the file or folder name) and re-checks those papers, so the anonymity check can look for the real author names. `ingest --meta export.xlsx` does both in one go.
+- `check --camera-ready` checks final versions instead: anonymity is off, and it requires an author block that matches the imported author list, a copyright notice, embedded fonts and no review leftovers (line numbers, "anonymous", draft marks).
+- `report` prints a one-screen health summary of the batch: how many papers are clear, worth a look or failing, the most common problems and whether authors can fix them, page counts and formats.
 - `export --out screening.csv` writes one row per paper (fails, warnings, dismissed, flags, whether the authors have something to fix) for a spreadsheet.
 
 ## Run
@@ -72,3 +75,5 @@ python -m screening serve        # http://127.0.0.1:8000, keys: j/k move, Enter 
 ```
 
 There is no login yet, so it binds to localhost; `--by` sets the name recorded on decisions.
+
+Author pre-check: `python -m screening serve --authors` serves one page where an author uploads their paper (.zip of LaTeX sources, .tex or Word) and gets the same checks as a checklist with how to fix each item. Nothing is stored and no reference lookups leave the machine.
