@@ -1,5 +1,11 @@
 /* Layout follows the LaTeX-editor pattern chairs already know: a project list, then a log panel beside the PDF. */
 
+/* Noto Sans ships with the app (SIL OFL, fonts/OFL.txt), so it looks the same offline on every machine */
+@font-face { font-family: "Noto Sans"; font-style: normal; font-weight: 100 900; font-display: swap; src: url(fonts/noto-sans-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Noto Sans"; font-style: normal; font-weight: 100 900; font-display: swap; src: url(fonts/noto-sans-latin-ext.woff2) format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+
 :root {
   color-scheme: light;
   --bar: #1B222C; --bar-ink: #FFFFFF; --bar-sub: #A6AEBA; --bar-hover: #2F3A4C;
@@ -79,7 +85,7 @@ td.n { color: var(--sub); white-space: nowrap; font-variant-numeric: tabular-num
 .keys { margin-top: 12px; font-size: 12px; color: var(--faint); }
 
 /* Paper screen: icon rail, log panel, PDF */
-.ed { display: grid; grid-template-columns: 48px 440px minmax(0, 1fr); height: calc(100vh - 44px); }
+.ed { --split: 440px; display: grid; grid-template-columns: 48px var(--split) 6px minmax(0, 1fr); height: calc(100vh - 44px); }
 .rail { background: var(--bar); display: flex; flex-direction: column; align-items: center; padding-top: 6px; gap: 2px; }
 .rail a { position: relative; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 4px; color: var(--bar-sub); }
 .rail a:hover { background: var(--bar-hover); color: var(--bar-ink); }
@@ -87,7 +93,7 @@ td.n { color: var(--sub); white-space: nowrap; font-variant-numeric: tabular-num
 .rail .ic { width: 18px; height: 18px; }
 .badge { position: absolute; top: 1px; right: -1px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: #E04A40; color: #fff; font-size: 10px; font-weight: 700; display: grid; place-items: center; }
 .badge.warn { background: #DE8014; }
-.panel { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); background: var(--soft); }
+.panel { display: flex; flex-direction: column; min-height: 0; background: var(--soft); }
 .ph { padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--bg); }
 .ph h1 { font-size: 15px; font-weight: 600; line-height: 1.35; }
 .ph .meta { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
@@ -124,9 +130,24 @@ details.why[open] summary { display: none; }
 .log p { color: var(--sub); margin-top: 2px; }
 
 .pdf { display: flex; flex-direction: column; min-height: 0; background: var(--pdf); }
-.pt { height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--bg); border-bottom: 1px solid var(--line); }
+.pt { height: 40px; display: flex; align-items: center; gap: 4px; padding: 0 8px; background: var(--bar); color: var(--bar-ink); }
+.pt .tb { width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 4px; background: none; color: var(--bar-ink); cursor: pointer; }
+.pt .tb:hover { background: var(--bar-hover); }
+.pt .tb.wide { width: auto; display: flex; gap: 6px; padding: 0 10px; font-size: 13px; text-decoration: none; }
+.pt .tb:focus-visible { outline: 2px solid var(--green); outline-offset: -2px; }
+.pt .pg { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--bar-sub); font-variant-numeric: tabular-nums; }
+.pt .pg input { width: 44px; height: 26px; padding: 0 4px; text-align: center; border: 1px solid #3E4A5C; border-radius: 4px; background: #11161D; color: var(--bar-ink); font: inherit; -moz-appearance: textfield; }
+.pt .pg input::-webkit-inner-spin-button, .pt .pg input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.pt select { height: 26px; padding: 0 6px; border: 1px solid #3E4A5C; border-radius: 4px; background: #11161D; color: var(--bar-ink); font: inherit; font-size: 13px; cursor: pointer; }
+.pt .pg input:focus, .pt select:focus { outline: none; border-color: var(--green); }
+.pt .sep { width: 1px; height: 20px; background: #3E4A5C; margin: 0 6px; }
+.gutter { background: var(--line); cursor: col-resize; display: grid; place-items: center; touch-action: none; }
+.gutter:hover, .gutter:focus-visible, .dragging .gutter { background: #C6CCD5; outline: none; }
+.gutter span { height: 28px; border-left: 2px dotted var(--faint); }
+.dragging { cursor: col-resize; user-select: none; }
+.dragging iframe { pointer-events: none; }
 .pt .sp { flex: 1; }
-.pt .count { font-size: 13px; color: var(--sub); }
+.pt .count { font-size: 13px; color: var(--bar-sub); padding: 0 4px; }
 .pdf iframe { flex: 1; width: 100%; border: 0; }
 .pdf .none { margin: auto; text-align: center; color: var(--sub); max-width: 40ch; }
 .pdf .none strong { display: block; color: var(--ink); }
@@ -140,6 +161,7 @@ details.why[open] summary { display: none; }
   .hide-sm, .bar .who { display: none; }
   .ed { grid-template-columns: 48px minmax(0, 1fr); grid-template-rows: auto 70vh; height: auto; }
   .panel { border-right: 0; }
+  .gutter { display: none; }
   .pdf { grid-column: 1 / -1; }
 }
 

@@ -140,14 +140,30 @@
     </div>
   </section>
 
+  <div class="gutter" id="gutter" role="separator" aria-orientation="vertical" aria-label="Drag to resize the panels" tabindex="0" title="Drag to resize, double-click to reset"><span></span></div>
+
   <section class="pdf" aria-label="Paper PDF">
     <div class="pt">
-      <span class="count">{{ ref }}{% if p.page_count %}, {{ p.page_count }} pages{% endif %}</span>
+      {% if has_pdf %}
+      <label class="pg" title="Page">
+        <input id="pg" type="number" min="1" max="{{ p.page_count or 999 }}" value="1" inputmode="numeric" aria-label="Page number">
+        {% if p.page_count %}<span>/ {{ p.page_count }}</span>{% endif %}
+      </label>
+      <span class="sep"></span>
+      <button class="tb" type="button" id="zout" title="Zoom out" aria-label="Zoom out"><svg class="ic" viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+      <select id="zoom" aria-label="Zoom">
+        <option value="FitH">Fit to width</option>
+        {% for z in (50, 75, 100, 125, 150, 200, 300) %}<option value="{{ z }}">{{ z }}%</option>{% endfor %}
+      </select>
+      <button class="tb" type="button" id="zin" title="Zoom in" aria-label="Zoom in"><svg class="ic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
       <span class="sp"></span>
-      {% if has_pdf %}<a class="btn sm" href="/paper/{{ p.id }}/pdf" download>Download PDF</a>{% endif %}
+      <a class="tb wide" href="/paper/{{ p.id }}/pdf" download><svg class="ic" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M4 19h16"/></svg>Download</a>
+      {% else %}
+      <span class="count">{{ ref }}</span>
+      {% endif %}
     </div>
     {% if has_pdf %}
-    <iframe id="pdf" title="Paper PDF" src="/paper/{{ p.id }}/pdf#view=FitH"></iframe>
+    <iframe id="pdf" title="Paper PDF" src="/paper/{{ p.id }}/pdf#page=1&view=FitH&toolbar=0&navpanes=0"></iframe>
     {% else %}
     <div class="none"><strong>No PDF to show</strong>This paper has no built PDF, usually because its sources did not compile. The flags still apply.</div>
     {% endif %}
@@ -156,7 +172,45 @@
 {% endblock %}
 {% block script %}
 <script>
-  function goto(n) { document.getElementById("pdf").src = "/paper/{{ p.id }}/pdf#page=" + n + "&view=FitH"; }
+  // The browser's own PDF viewer renders the paper; this toolbar steers it through the URL (page, zoom, fit).
+  // shortcut: the viewer does not report scrolling back, so the page box shows the page last chosen here;
+  // bundle pdf.js if chairs need a live page counter. Safari ignores toolbar=0 and keeps its own controls.
+  const frame = document.getElementById("pdf"), pg = document.getElementById("pg"), zoom = document.getElementById("zoom");
+  const num = v => /^\d+$/.test(v);
+  const steps = frame ? [...zoom.options].map(o => o.value).filter(num).map(Number) : [];
+  function show() {
+    frame.src = "/paper/{{ p.id }}/pdf#page=" + pg.value + "&" + (num(zoom.value) ? "zoom=" : "view=") + zoom.value + "&toolbar=0&navpanes=0";
+  }
+  function goto(n) { pg.value = n; show(); }
+  function step(d) {
+    const cur = num(zoom.value) ? +zoom.value : 100;
+    const next = d > 0 ? steps.find(s => s > cur) : [...steps].reverse().find(s => s < cur);
+    if (next) { zoom.value = next; show(); }
+  }
+  if (frame) {
+    pg.addEventListener("change", () => { pg.value = Math.max(1, Math.min(+pg.max, +pg.value || 1)); show(); });
+    zoom.addEventListener("change", show);
+    document.getElementById("zin").onclick = () => step(1);
+    document.getElementById("zout").onclick = () => step(-1);
+  }
+
+  // The bar between the flags and the PDF can be dragged; the width is remembered in this browser.
+  const ed = document.querySelector(".ed"), gut = document.getElementById("gutter"), KEY = "panelWidth";
+  const width = () => parseInt(getComputedStyle(ed).getPropertyValue("--split"));
+  const setW = w => ed.style.setProperty("--split", Math.round(Math.max(320, Math.min(innerWidth - 48 - 360, w))) + "px");
+  const save = () => { try { localStorage.setItem(KEY, width()); } catch (e) {} };
+  try { const w = +localStorage.getItem(KEY); if (w) setW(w); } catch (e) {}
+  gut.addEventListener("pointerdown", e => {
+    e.preventDefault(); gut.setPointerCapture(e.pointerId); ed.classList.add("dragging");
+    const move = m => setW(m.clientX - 48 - 3);
+    gut.addEventListener("pointermove", move);
+    gut.addEventListener("pointerup", () => { gut.removeEventListener("pointermove", move); ed.classList.remove("dragging"); save(); }, { once: true });
+  });
+  gut.addEventListener("keydown", e => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault(); setW(width() + (e.key === "ArrowLeft" ? -40 : 40)); save();
+  });
+  gut.addEventListener("dblclick", () => { ed.style.removeProperty("--split"); try { localStorage.removeItem(KEY); } catch (e) {} });
   addEventListener("keydown", e => {
     if (typing(e)) return;
     {% if prev %}if (e.key === "k") location = "/paper/{{ prev }}";{% endif %}
