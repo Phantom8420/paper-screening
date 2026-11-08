@@ -4,6 +4,13 @@ Organizer-side screening for conference submissions in LaTeX and Word. It runs t
 objective checks, links every flag to its evidence and keeps a full decision log.
 It recommends; people decide. Design: [docs/DESIGN.md](docs/DESIGN.md).
 
+**Online demo:** [paper-screening.vercel.app](https://paper-screening.vercel.app) shows seven made-up
+submissions, already checked, each with one planted problem (author names in a blind paper, over the page
+limit, a hidden prompt to AI reviewers, a copy of a past paper, an invented reference, a Word file). Adding
+papers is switched off there, so nothing real is ever uploaded to it; clicks reset when the demo restarts.
+`python demo/make_demo.py` rebuilds the sample files in `demo/`; `demo/data` holds their checked results,
+which `api/index.py` serves on Vercel (`npx vercel deploy --prod`). A walkthrough video is in [demo/walkthrough.mp4](demo/walkthrough.mp4).
+
 ## Start here (no command line)
 
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) once and start it.

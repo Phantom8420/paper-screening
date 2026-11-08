@@ -10,6 +10,7 @@
     <h1>Add papers</h1>
     <p>Every paper is checked for page limit, template, anonymity, sections and references. This takes about
       a minute per ten papers, and you can keep this page open or come back later.</p>
+    {% if demo %}<p class="demo-note" role="note">{{ demo }}</p>{% endif %}
     {% if error %}<p class="err" role="alert">{{ error }}</p>{% endif %}
     <form method="post" enctype="multipart/form-data" id="f">
       <div class="step">
@@ -37,7 +38,7 @@
         <span>These are final versions (camera-ready)<small>Checks for the author names, copyright notice and embedded fonts instead of anonymity.</small></span></label>
       <label class="check"><input type="checkbox" name="past" value="true">
         <span>These are published papers from earlier years<small>They are not checked or listed. Every submission is compared with them, so text or figures reused from past proceedings are found.</small></span></label>
-      <button class="btn green go" id="go">Add and check papers</button>
+      <button class="btn green go" id="go"{{ " disabled" if demo }}>Add and check papers</button>
     </form>
   </main>
 </div>

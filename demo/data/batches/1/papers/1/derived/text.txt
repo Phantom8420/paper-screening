@@ -1,0 +1,26 @@
+Energy-Aware Task Offloading for Battery-Powered Devices at the Network Edge
+
+Offloading heavy tasks to a nearby edge server saves device battery but adds delay when the link is weak or the server is busy. We propose a threshold policy that compares local and upload energy per task using estimates refreshed from recent tasks, and a once-per-second server load broadcast. In simulation it saves 37% of device energy while missing 2% of deadlines.
+
+
+edge computing, task offloading, energy efficiency
+
+
+
+Introduction
+Phones and sensors increasingly run tasks that are too heavy for their batteries, such as video analytics and speech recognition. Edge computing places servers close to users so that such tasks can be offloaded with low delay . Deciding which tasks to offload is hard because the radio link, the server load and the battery level all change from second to second .
+We study a cell with one edge server and many devices, each holding a queue of tasks. A device can run a task locally, spending energy on computation, or upload it, spending energy on transmission and waiting for the server.
+
+
+Method
+Each device keeps an estimate of its uplink rate and of the server’s waiting time, both updated from the last ten offloaded tasks. For a new task it compares the energy of local execution with the energy of uploading, and offloads when uploading is cheaper and the expected completion time meets the task’s deadline. The server broadcasts its queue length once per second so that devices do not all offload at the same moment.
+
+
+Results
+We simulated 50 devices with tasks drawn from a video analytics trace. Compared with always running locally, the policy saves 37% of device energy and misses 2% of deadlines. Always offloading saves more energy at low load but misses a quarter of the deadlines once more than 30 devices are active, because the server queue grows without bound.
+
+
+Conclusion
+A simple threshold rule with a once-per-second load broadcast captures most of the energy savings of offloading while keeping deadline misses low. Learning-based policies  may do better under bursty load, which we leave to future work.
+99 W. Shi, J. Cao, Q. Zhang, Y. Li, and L. Xu, “Edge computing: Vision and challenges,” IEEE Internet Things J., vol. 3, no. 5, pp. 637–646, 2016. Y. Mao, C. You, J. Zhang, K. Huang, and K. B. Letaief, “A survey on mobile edge computing: The communication perspective,” IEEE Commun. Surveys Tuts., vol. 19, no. 4, pp. 2322–2358, 2017. V. Mnih et al., “Human-level control through deep reinforcement learning,” Nature, vol. 518, pp. 529–533, 2015.
+

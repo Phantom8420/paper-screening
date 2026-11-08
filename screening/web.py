@@ -90,14 +90,19 @@ def run_batch(data: Path, work: Path, files: list[Path], export: Path | None, ru
         shutil.rmtree(work, ignore_errors=True)
 
 
-def create_app(data: Path, actor: str, rules=None) -> FastAPI:
+DEMO_NOTE = ("This online demo shows made-up sample papers only. To check real papers, run the app on your own computer, "
+             "where the papers never leave it.")
+
+
+def create_app(data: Path, actor: str, rules=None, demo=False) -> FastAPI:
+    """demo: a public copy with sample papers; adding papers is switched off, so nothing real is uploaded."""
     data = Path(data)
     rules = rules or load_rules(None)
     job: dict = {}  # the one batch being added; a second upload waits until it finishes
     app = FastAPI(title="Paper screening", docs_url=None, redoc_url=None)
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     tpl = Jinja2Templates(directory=HERE / "templates")
-    tpl.env.globals.update(actor=actor, css=CSS_VERSION, label=lambda c: c.replace("_", " ").capitalize())
+    tpl.env.globals.update(actor=actor, css=CSS_VERSION, demo=DEMO_NOTE if demo else "", label=lambda c: c.replace("_", " ").capitalize())
 
     def db() -> sqlite3.Connection:
         return connect(data / "screening.db")
@@ -155,6 +160,8 @@ def create_app(data: Path, actor: str, rules=None) -> FastAPI:
         def fail(msg):
             return tpl.TemplateResponse(request, "add.html", {"papers": ",".join(PAPER_TYPES),
                                         "exports": ",".join(EXPORT_TYPES), "error": msg}, 400)
+        if demo:
+            return fail(DEMO_NOTE)
         if job.get("state") == "running":
             return fail("Papers are still being checked. Wait until they finish, then add more.")
         uploads = [u for u in papers_ if u.filename]

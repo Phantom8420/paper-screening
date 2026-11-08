@@ -10,6 +10,7 @@
 <header class="bar {% block barclass %}{% endblock %}">
   <a class="brand" href="/"><span class="mark"><svg class="ic" viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg></span>Screening</a>
   {% block bar %}<span class="sp"></span>{% endblock %}
+  {% if demo %}<span class="pill demo hide-sm" title="Made-up papers; your changes reset when the demo restarts">Demo with sample papers</span>{% endif %}
   <span class="who">{{ actor }}</span>
 </header>
 {% block body %}{% endblock %}

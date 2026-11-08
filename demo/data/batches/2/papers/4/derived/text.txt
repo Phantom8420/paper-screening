@@ -1,0 +1,53 @@
+Graph Convolution for Short-Term Road Speed Prediction in Dense City Grids
+
+Navigation services predict road speed a few minutes ahead from loop detectors and probe vehicles. We model the road network as a graph and combine graph convolution with a recurrent layer, so a jam spreading from one junction informs the forecast on its neighbors. On 1,800 road segments the model reduces the 15-minute error by 14% over a per-segment recurrent baseline.
+
+
+traffic prediction, graph neural networks, intelligent transport
+
+
+
+Introduction
+Congestion travels along roads: a blocked junction slows the segments that feed it a few minutes later. Forecasting each segment on its own ignores this, while treating the city as an image ignores that two adjacent pixels may be streets with no connection.
+Graph convolution  passes information along edges of a graph, which matches how traffic moves. We combine it with a recurrent layer  that tracks how each segment changes over time.
+
+
+Method
+Nodes are road segments and edges join segments that share a junction, directed in the driving direction. Each node carries the last hour of five-minute average speeds. Two graph convolution layers mix each node with its neighbors up to two junctions away, and a gated recurrent layer turns the sequence of mixed features into a forecast for the next 15, 30 and 60 minutes. We trained with Adam  on six months of data.
+
+
+Results
+Table 1 reports the mean absolute error in km/h. The graph model helps most during the onset of congestion, when the per-segment baseline only reacts after the speed has already dropped. The full week-long speed maps for each district follow in Figs. 1–6.
+Mean absolute error in km/h
+Model
+15 min
+30 min
+60 min
+Per-segment LSTM
+4.9
+6.3
+8.1
+Graph + GRU (ours)
+4.2
+5.4
+7.0
+
+
+Predicted and measured speed for district 1 over one week.
+
+Predicted and measured speed for district 2 over one week.
+
+Predicted and measured speed for district 3 over one week.
+
+Predicted and measured speed for district 4 over one week.
+
+Predicted and measured speed for district 5 over one week.
+
+Predicted and measured speed for district 6 over one week.
+
+
+
+Conclusion
+Treating the road network as a graph lets a forecaster see congestion coming from upstream. The gain over per-segment models is largest exactly when drivers need the forecast most, at the start of a jam. Deep learning methods  keep improving here, and the graph structure is a cheap, strong prior to build on.
+99 T. N. Kipf and M. Welling, “Semi-supervised classification with graph convolutional networks,” in Proc. ICLR, 2017. S. Hochreiter and J. Schmidhuber, “Long short-term memory,” Neural Computation, vol. 9, no. 8, pp. 1735–1780, 1997. D. P. Kingma and J. Ba, “Adam: A method for stochastic optimization,” in Proc. ICLR, 2015. Y. LeCun, Y. Bengio, and G. Hinton, “Deep learning,” Nature, vol. 521, pp. 436–444, 2015.
+

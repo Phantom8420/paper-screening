@@ -1,0 +1,10 @@
+# Vercel demo only (api/index.py). The full install uses pyproject.toml; plain pypandoc here because the demo
+# converts nothing and the bundled pandoc binary would not fit Vercel's size limit.
+fastapi>=0.110
+jinja2>=3.1
+python-multipart>=0.0.9
+pypdf>=5
+pillow>=10
+openpyxl>=3.1
+pypandoc>=1.15
+paper-preflight==1.0.0

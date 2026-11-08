@@ -1,0 +1,3 @@
+{
+  "functions": { "api/index.py": { "includeFiles": "{screening,demo/data}/**", "maxDuration": 30 } }
+}

@@ -1,0 +1,42 @@
+Lightweight Beam Selection for Millimeter-Wave Links Using Channel Fingerprints
+
+Millimeter-wave links need narrow beams, and finding the right beam pair costs time and energy every time a user moves. We propose a beam selector that matches a short channel fingerprint, measured on four wide beams, against a small table learned offline. On a ray-traced campus scenario the selector finds a beam within 1 dB of the best one in 93% of positions while sweeping only 6% of the codebook.
+
+
+millimeter wave, beam management, fingerprinting, 5G
+
+
+
+Introduction
+Millimeter-wave bands offer wide channels, but path loss is high and links only close with directional beams on both ends . A base station with a 64-beam codebook and a handset with 16 beams has 1024 beam pairs, and an exhaustive sweep has to be repeated whenever the user turns or walks behind an obstacle. Large antenna arrays make the problem sharper, since every added element narrows the beam .
+Most proposals shorten the sweep with hierarchical codebooks or with side information such as GPS. Hierarchical search still pays several rounds of feedback, and location is often unavailable indoors. We ask a narrower question: how much of the sweep can be replaced by a few measurements on wide beams that the base station sends anyway?
+
+
+Method
+Each base station transmits four wide synchronization beams. A user reports the received power on each, which gives a four-value fingerprint. Offline, we collect fingerprints at known positions together with the best narrow beam pair at each position. Online, the selector finds the three stored fingerprints nearest to the report and sweeps only the narrow beams that were best at those positions.
+The table is small: one entry per square meter of a 200 by 150 meter campus fits in less than a megabyte. Matching uses the Euclidean distance between fingerprints in decibels, which makes the method insensitive to a constant gain offset between handsets once each fingerprint is normalized by its strongest entry.
+
+
+Results
+We used a ray-traced model of a university campus at 28 GHz with buildings, foliage and parked cars. Table 1 compares the selector with an exhaustive sweep and a two-stage hierarchical search. The selector needs 62 beam measurements on average instead of 1024, and the beam it picks is within 1 dB of the best pair in 93% of positions. Failures cluster at street corners where the line of sight changes within a few meters; adding a fifth wide beam pointed along the main street removes half of them. Training the table with a small residual network  optimized with Adam  did not beat the plain nearest-neighbor lookup, so we kept the simpler method.
+Beam search cost and accuracy
+Method
+Measurements
+Within 1 dB
+Exhaustive sweep
+1024
+100%
+Hierarchical
+96
+88%
+Fingerprint (ours)
+62
+93%
+
+
+
+
+Conclusion
+A four-value fingerprint on beams the network already transmits is enough to skip most of a millimeter-wave beam sweep. The method needs no location and no new signaling, which fits the measurement framework expected in 5G systems . Next we will test it with measured rather than ray-traced channels and with moving users.
+99 T. S. Rappaport et al., “Millimeter wave mobile communications for 5G cellular: It will work!” IEEE Access, vol. 1, pp. 335–349, 2013. E. G. Larsson, O. Edfors, F. Tufvesson, and T. L. Marzetta, “Massive MIMO for next generation wireless systems,” IEEE Commun. Mag., vol. 52, no. 2, pp. 186–195, 2014. J. G. Andrews et al., “What will 5G be?” IEEE J. Sel. Areas Commun., vol. 32, no. 6, pp. 1065–1082, 2014. K. He, X. Zhang, S. Ren, and J. Sun, “Deep residual learning for image recognition,” in Proc. IEEE CVPR, 2016, pp. 770–778. D. P. Kingma and J. Ba, “Adam: A method for stochastic optimization,” in Proc. ICLR, 2015.
+

@@ -1,0 +1,17 @@
+
+Low-Cost Vibration Monitoring for Footbridge Health Using Smartphone Accelerometers
+Anonymous Authors
+Abstract—Footbridges are inspected visually every few years, and stiffness loss between inspections goes unseen. We mount ordinary smartphones on handrails and track the bridge's first natural frequencies from ambient vibration. On three steel footbridges the phones measured the first bending frequency within 0.05 Hz of a reference accelerometer, enough to see the 2% drop that a loose bearing caused on one of them.
+Keywords—structural health monitoring, vibration, accelerometers, footbridges
+I. INTRODUCTION
+Damage changes a structure's stiffness, and stiffness sets its natural frequencies. Tracking those frequencies over months is an established way to notice damage early, but permanent accelerometer networks cost more than small municipalities spend on a footbridge in a decade.
+Smartphones carry accelerometers that sample at 100 Hz or more. Their noise floor is high, but footbridges are lively structures excited by every pedestrian, so the signal is strong.
+II. METHOD
+Two phones are clamped to the handrail at mid-span and at a quarter of the span. Each records acceleration for ten minutes every hour and uploads a spectrum rather than the raw signal. Peaks in the averaged spectrum are matched across days, and an alert is raised when a frequency moves more than three standard deviations from its seasonal baseline, after correcting for temperature.
+III. RESULTS
+Over five months the phones tracked the first bending frequency of all three bridges with a standard deviation of 0.03 Hz. On one bridge the frequency fell by 2% within a week; inspection found a loosened bearing bolt, and the frequency returned to its baseline after repair. Battery packs lasted six weeks between changes.
+IV. CONCLUSION
+Phones on a handrail are a cheap, workable way to watch a footbridge between inspections. The method needs no cabling and no specialist hardware, so it can be installed by maintenance staff in an hour.
+REFERENCES
+[1] C. R. Farrar and K. Worden, “An introduction to structural health monitoring,” Philos. Trans. R. Soc. A, vol. 365, no. 1851, pp. 303–315, 2007.
+[2] S. W. Doebling, C. R. Farrar, and M. B. Prime, “A summary review of vibration-based damage identification methods,” Shock Vib. Dig., vol. 30, no. 2, pp. 91–105, 1998.

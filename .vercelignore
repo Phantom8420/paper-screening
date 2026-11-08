@@ -1,0 +1,8 @@
+tests
+docs
+demo/submissions
+demo/past
+*.bat
+*.command
+Dockerfile
+pyproject.toml
