@@ -43,6 +43,14 @@ DEFAULT_RULES = {  # IEEE conference defaults; override any key with a TOML file
     "duplicates": {"warn_overlap": 0.1, "fail_overlap": 0.7},
     # final versions: authors must be shown, the copyright notice present, every font embedded (IEEE Xplore)
     "camera_ready": {"enabled": False, "copyright_notice": True, "fonts_embedded": True},
+    # "local" sends nothing; a provider that receives full text must also be listed in send_full_text_to
+    "similarity": {"providers": ["local"], "send_full_text_to": []},
+    # the conference's topics, e.g. ["wireless networks", "signal processing"]; empty: no scope check
+    "scope": {"topics": []},
+    "quality": {"require_code_statement": False},
+    # strength score 0-100 from the open flags; below review_at: "Needs fixes", below reject_below:
+    # "Desk-reject candidate". Labels only recommend.
+    "triage": {"review_at": 80, "reject_below": 40},
 }
 OPTIONAL_SOURCES = {"s2", "openlibrary", "github", "pypi", "cran", "huggingface", "openml", "web", "wayback"}
 MIN_WORDS = 300  # shortest real paper text; an abstract alone is ~250 words

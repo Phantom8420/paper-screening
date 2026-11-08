@@ -104,6 +104,10 @@ def _text(node) -> str:
         return c[-1]
     if t in ("RawInline", "RawBlock"):
         return ""
+    if t == "Quoted":  # keep the marks: the similarity check leaves quoted text out
+        return f"“{_text(c[1])}”"
+    if t == "BlockQuote":
+        return f"“{_text(c).strip()}”\n"
     s = _text(c)
     return s + "\n" if t in BLOCKS else s
 

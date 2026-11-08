@@ -16,6 +16,7 @@ LAST = {"lastname", "last", "familyname", "surname", "family"}
 NAME = {"name", "author", "authorname", "fullname"}
 AUTHORS = {"authors", "authorlist", "authornames"}
 EMAIL = {"email", "emailaddress", "mail"}
+ORCID = {"orcid", "orcidid"}  # "ORCID iD" after _key
 AFFIL = {"affiliation", "organization", "organisation", "institution", "company"}
 LAST_NUMBER = re.compile(r"(\d+)(?!.*\d)")
 
@@ -59,7 +60,8 @@ def _from_rows(rows: list[dict], into: dict) -> None:
         p["title"] = p["title"] or _pick(r, TITLE)
         name = _pick(r, NAME) or " ".join(x for x in (_pick(r, FIRST), _pick(r, LAST)) if x)
         if name:
-            p["authors"].append({"name": name, "email": _pick(r, EMAIL), "affiliation": _pick(r, AFFIL)})
+            p["authors"].append({"name": name, "email": _pick(r, EMAIL), "affiliation": _pick(r, AFFIL),
+                                 "orcid": _pick(r, ORCID)})
         elif joined := _pick(r, AUTHORS):  # EasyChair's Submissions sheet: "Ann Lee, Bo Chen and Cy Diaz"
             p.setdefault("listed", [n.strip() for n in re.split(r",|;|\band\b", joined) if n.strip()])
 
@@ -75,11 +77,12 @@ def _from_json(data, into: dict) -> None:
             a = {_key(k): v for k, v in a.items()} if isinstance(a, dict) else {"name": str(a)}
             name = _pick(a, NAME) or " ".join(x for x in (_pick(a, FIRST), _pick(a, LAST)) if x)
             if name:
-                p["authors"].append({"name": name, "email": _pick(a, EMAIL), "affiliation": _pick(a, AFFIL)})
+                p["authors"].append({"name": name, "email": _pick(a, EMAIL), "affiliation": _pick(a, AFFIL),
+                                     "orcid": _pick(a, ORCID)})
 
 
 def read_export(path: Path) -> dict[int, dict]:
-    """{submission number: {"title", "authors": [{name, email, affiliation}]}}"""
+    """{submission number: {"title", "authors": [{name, email, affiliation, orcid}]}}"""
     path = Path(path)
     out: dict[int, dict] = {}
     suffix = path.suffix.lower()
@@ -114,8 +117,8 @@ def import_export(con, path: Path, batch_id=None, actor="system") -> dict:
         if rec["title"]:
             con.execute("UPDATE paper SET title=? WHERE id=?", (rec["title"], pid))
         con.execute("DELETE FROM author WHERE paper_id=?", (pid,))
-        con.executemany("INSERT INTO author(paper_id, position, name, email, affiliation) VALUES(?,?,?,?,?)",
-                        [(pid, i, a["name"], a["email"] or None, a["affiliation"] or None)
+        con.executemany("INSERT INTO author(paper_id, position, name, email, affiliation, orcid) VALUES(?,?,?,?,?,?)",
+                        [(pid, i, a["name"], a["email"] or None, a["affiliation"] or None, a.get("orcid") or None)
                          for i, a in enumerate(rec["authors"], 1)])
         matched.append(pid)
     result = {"file": Path(path).name, "records": len(meta), "matched": matched, "unmatched": unmatched}

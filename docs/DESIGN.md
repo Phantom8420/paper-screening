@@ -124,10 +124,10 @@ audit_log(id, ts, actor, action, entity, entity_id, payload_json) -- append-only
 | M1 | Intake and format segregation, conversion | zip or files go in; each paper gets a format queue, text, sections and PDF, or a "needs manual look" signal with the reason; tests |
 | M2 | Compliance checks | page limit, required sections, abstract/keywords, anonymization (body and file metadata), IEEE template markers |
 | M3 | Reference verification | paper-preflight wrapped behind one function (swap engines there); cache; flags for unresolvable, mismatched, uncited, undefined keys, retracted, unverifiable; numeric [n] check for Word |
-| M4 | Similarity (local) | **started:** duplicate and overlapping submissions across the database (5-word phrase index, references excluded, boilerplate ignored, shared passages as evidence). Still to do: shingle/MinHash index of the pool and past proceedings; references and quotes excluded; per-source breakdown; provider interface |
-| M5 | Quality signals | tortured phrases, scope match (once themes are supplied), code/data availability statements, basic figure reuse (perceptual hash) |
-| M6 | Scoring, triage, review UI | strength tier with sub-scores, triage labels with thresholds you set, queue sorted by risk, evidence view, decisions, overrides, appeals, audit |
-| M7 | Reports and interop | author feedback reports, CSV import/export (columns taken from a real export from your submission system), ORCID, chair dashboard, PDF integrity report |
+| M4 | Similarity (local) | **done:** 5-word phrase index of the pool and of past proceedings (`ingest --past`); references, acknowledgments and quoted text left out, boilerplate ignored; per-source breakdown (this conference vs each past-proceedings batch); provider interface in `similarity.py` that refuses any provider sending full text unless the chairs list it in `send_full_text_to` |
+| M5 | Quality signals | **done:** tortured phrases (with the usual term), scope match against `[scope] topics`, code/data availability statements, figure reuse by 64-bit difference hash across submissions and past proceedings |
+| M6 | Scoring, triage, review UI | **done:** score with six sub-scores (Format, Anonymity, References, Originality, Quality, Integrity), triage labels with `[triage]` thresholds, chair-only problems routed to Chair check, appeals recorded, granted or denied with a reason and kept in the audit log |
+| M7 | Reports and interop | **done:** ORCID checksum from the author list, PDF integrity report (hidden text, hidden prompts, scripts, embedded files, encryption, revisions), conference report page, score and triage in the CSV export. ORCID is checked locally only; no lookup against orcid.org |
 
 ## Security notes
 

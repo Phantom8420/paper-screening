@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% set filters = (("todo", "To decide"), ("fail", "Failed a check"), ("look", "Worth a look"), ("ok", "All clear"), ("all", "All papers")) %}
+{% set filters = (("todo", "To decide"), ("fail", "Failed a check"), ("look", "Worth a look"), ("ok", "All clear"), ("appeals", "Open appeals"), ("all", "All papers")) %}
+{% set tone = {"review": "ok", "fix": "warn", "chair": "chair", "reject": "fail", "wait": "plain"} %}
 {% block title %}Papers · Screening{% endblock %}
 {% block barclass %}light{% endblock %}
 {% block body %}
@@ -10,6 +11,7 @@
     <a class="f {{ 'on' if show == key }}" href="/?show={{ key }}">{{ name }} <span>{{ total if key == "all" else counts[key] }}</span></a>
     {% endfor %}
     <hr>
+    <a class="side" href="/report">Conference report</a>
     <a class="side" href="/export.csv">Download results (CSV)</a>
     <p class="foot">Checks only recommend. Nothing is decided until you decide it.</p>
   </nav>
@@ -22,6 +24,8 @@
       <span class="spin" aria-hidden="true"></span>
       <span id="jobtext">{% if job.total and job.done == job.total %}Looking up the references online…{% elif job.total %}Checking papers: {{ job.done }} of {{ job.total }} done{% else %}Unpacking {{ job.files }} file(s)…{% endif %}</span>
       <progress id="jobbar" max="{{ job.total or 1 }}" value="{{ job.done }}"></progress>
+      {% elif job.state == "done" and job.past %}
+      <span>{{ job.total }} published paper(s) added. Every submission was compared with them again; they are not listed here.</span>
       {% elif job.state == "done" %}
       <span>{{ job.total }} paper(s) added and checked.{% if job.unmatched %} {{ job.unmatched }} could not be matched to the author list; check that the file names carry the submission numbers.{% endif %}</span>
       {% else %}
@@ -35,7 +39,7 @@
     {% endif %}
     {% if rows %}
     <table>
-      <thead><tr><th>Title</th><th class="hide-sm">Open flags</th><th class="hide-sm">Pages</th><th>Status</th></tr></thead>
+      <thead><tr><th>Title</th><th class="hide-sm">Open flags</th><th class="hide-sm">Pages</th><th>Recommendation</th></tr></thead>
       <tbody>
       {% for r in rows %}
         <tr data-href="/paper/{{ r.p.id }}" data-q="{{ (r.p.title or '') ~ ' ' ~ (r.p.external_id or '') ~ ' ' ~ r.open|map(attribute='code')|join(' ') }}">
@@ -47,7 +51,8 @@
             {% if r.dismissed %}<span class="pill plain">{{ r.dismissed|length }} dismissed</span>{% endif %}
           </div></td>
           <td class="n hide-sm">{{ r.p.page_count or "–" }}</td>
-          <td class="n">{% if r.tier == "wait" %}<span class="pill plain">Checking…</span>{% elif r.fails %}<span class="pill fail">{{ r.fails }} required</span>{% elif r.warns %}<span class="pill warn">{{ r.warns }} to check</span>{% else %}<span class="pill ok">Clear</span>{% endif %}</td>
+          <td class="n">{% if r.tier == "wait" %}<span class="pill plain">Checking…</span>{% else %}<span class="pill {{ tone[r.sc.triage] }}">{{ r.sc.label }}</span>
+            <small class="score">Score {{ r.sc.score }}{% if r.fails %}, {{ r.fails }} required{% elif r.warns %}, {{ r.warns }} to check{% endif %}{% if r.appeals %}, appeal open{% endif %}</small>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>

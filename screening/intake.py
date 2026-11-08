@@ -156,11 +156,13 @@ def discover(path: Path, work: Path, depth: int = 0, budget: dict | None = None)
     return [Unit(path, "unknown", None, notes + [("unsupported_file", "fail", msg, {"file": path.name})])]
 
 
-def ingest(con, inputs, data_dir, name=None, actor="system") -> tuple[int, list[int]]:
-    """Store originals, create one paper row per unit. Returns (batch_id, paper_ids)."""
+def ingest(con, inputs, data_dir, name=None, actor="system", kind="submissions") -> tuple[int, list[int]]:
+    """Store originals, create one paper row per unit. Returns (batch_id, paper_ids). kind "past" is a set of
+    already published papers (earlier proceedings): compared against, never screened or listed."""
     data_dir = Path(data_dir)
     inputs = [Path(p) for p in inputs]
-    batch_id = con.execute("INSERT INTO batch(name, created_at) VALUES(?,?)", (name or now(), now())).lastrowid
+    batch_id = con.execute("INSERT INTO batch(name, created_at, kind) VALUES(?,?,?)",
+                           (name or now(), now(), kind)).lastrowid
     con.commit()  # AUTOINCREMENT + early commit: a later crash cannot reuse this id or its folder
     bdir = data_dir / "batches" / str(batch_id)
     (bdir / "inputs").mkdir(parents=True, exist_ok=True)
@@ -184,7 +186,7 @@ def ingest(con, inputs, data_dir, name=None, actor="system") -> tuple[int, list[
                 "empty_input", "fail", f"{p.name} contains no files to screen.", {"input": p.name})])]
         for u in units:
             paper_ids.append(_store_unit(con, u, batch_id, bdir, data_dir))
-    audit(con, actor, "ingest", "batch", batch_id, {"inputs": [p.name for p in inputs], "papers": paper_ids})
+    audit(con, actor, "ingest", "batch", batch_id, {"kind": kind, "inputs": [p.name for p in inputs], "papers": paper_ids})
     con.commit()
     return batch_id, paper_ids
 

@@ -55,6 +55,9 @@ FIX_HINTS = {
     "copyright_notice_missing": "Add the IEEE copyright notice from your copyright form to the first page.",
     "fonts_not_embedded": "Embed all fonts (LaTeX: pdflatex embeds by default; Word: File > Options > Save > "
                           "Embed fonts, or print to PDF with IEEE PDF eXpress).",
+    "no_code_data_statement": "Say where the code and data can be found (a repository link, or why they cannot "
+                              "be shared).",
+    "orcid_invalid": "Correct the ORCID iD in the submission system (16 digits, from orcid.org).",
 }
 RISK = {"fail": 2, "warn": 1, "info": 0}
 
@@ -126,6 +129,48 @@ def restore(con, paper_id, code, reason, actor):
     _decide(con, paper_id, code, "restore", reason, actor)
 
 
+def appeals(con, paper_id) -> dict:
+    """code -> latest appeal state {"status": open|granted|denied, "text", "by", "at", "reason"}."""
+    out = {}
+    for d in con.execute("SELECT * FROM decision WHERE paper_id=? AND kind='appeal' ORDER BY id", (paper_id,)):
+        try:
+            v = json.loads(d["value"])
+        except ValueError:
+            continue
+        if v.get("status") == "open":
+            out[v["code"]] = {"status": "open", "text": d["reason"], "by": d["actor"], "at": d["created_at"]}
+        elif v.get("code") in out:
+            out[v["code"]].update(status=v["status"], reason=d["reason"], decided_by=d["actor"])
+    return out
+
+
+def appeal(con, paper_id, code, text, actor):
+    """Record an author's appeal against a flag (a chair types it in from the author's reply)."""
+    if not text.strip():
+        raise ValueError("write down what the authors say")
+    if code not in {s["code"] for s in flags(con, paper_id)[0]}:
+        raise ValueError(f"paper {paper_id} has no open {code} flag")
+    _appeal(con, paper_id, code, "open", text, actor)
+
+
+def decide_appeal(con, paper_id, code, grant: bool, reason, actor):
+    """Granting dismisses the flag (reversible like any dismissal); denying keeps it. Both need a reason."""
+    if not reason.strip():
+        raise ValueError("a reason is required")
+    if appeals(con, paper_id).get(code, {}).get("status") != "open":
+        raise ValueError(f"paper {paper_id} has no open appeal on {code}")
+    _appeal(con, paper_id, code, "granted" if grant else "denied", reason, actor)
+    if grant:
+        dismiss(con, paper_id, code, f"Appeal granted: {reason}", actor)
+
+
+def _appeal(con, paper_id, code, status, text, actor):
+    con.execute("INSERT INTO decision(paper_id, actor, kind, value, reason, created_at) VALUES(?,?,?,?,?,?)",
+                (paper_id, actor, "appeal", json.dumps({"code": code, "status": status}), text, now()))
+    audit(con, actor, f"appeal_{status}", "paper", paper_id, {"code": code, "reason": text})
+    con.commit()
+
+
 def snapshot(con, ids) -> dict:
     return {pid: {s["code"] for s in flags(con, pid)[0]} for pid in ids}
 
@@ -181,30 +226,43 @@ def _cell(v):
     return "'" + v if isinstance(v, str) and v.startswith(("=", "+", "-", "@", "\t", "\r")) else v
 
 
-def papers(con, batch_id=None):
-    return con.execute("SELECT * FROM paper WHERE (? IS NULL OR batch_id=?) ORDER BY id", (batch_id, batch_id)).fetchall()
+def papers(con, batch_id=None, past=False):
+    """Submissions (or, with past=True, the past-proceedings papers they are compared against)."""
+    return con.execute("SELECT p.* FROM paper p JOIN batch b ON b.id = p.batch_id WHERE (? IS NULL OR p.batch_id=?)"
+                       " AND (b.kind = 'past') = ? ORDER BY p.id", (batch_id, batch_id, past)).fetchall()
 
 
-def export_csv(con, out, batch_id=None) -> int:
+def export_csv(con, out, batch_id=None, rules=None) -> int:
+    from .compliance import load_rules
+    from .scoring import score
+    rules = rules or load_rules()
     rows = papers(con, batch_id)
     with open(out, "w", newline="", encoding="utf-8-sig") as fh:  # BOM so Excel reads UTF-8 titles correctly
         w = csv.writer(fh)
         w.writerow(["paper_id", "external_id", "title", "format", "status", "pages", "fails", "warnings",
-                    "dismissed", "flags", "authors_can_fix"])
+                    "dismissed", "flags", "authors_can_fix", "score", "triage", "open_appeals"])
         for p in rows:
             open_, dismissed = flags(con, p["id"])
             w.writerow([p["id"], _cell(p["external_id"]), _cell(p["title"]), p["format"], p["status"], p["page_count"],
                         sum(s["severity"] == "fail" for s in open_), sum(s["severity"] == "warn" for s in open_),
                         len(dismissed), "; ".join(f"{s['severity']}:{s['code']}" for s in open_),
-                        "yes" if any(s["code"] in FIX_HINTS for s in open_) else "no"])
+                        "yes" if any(s["code"] in FIX_HINTS for s in open_) else "no",
+                        (sc := score(open_, p["status"], rules))["score"], sc["label"],
+                        sum(a["status"] == "open" for a in appeals(con, p["id"]).values())])
     return len(rows)
 
 
-def health(con, batch_id=None) -> dict:
+def health(con, batch_id=None, rules=None) -> dict:
     """The whole conference at a glance: how many papers are clear, which problems are common, and how long
     the papers run. Counts papers, not signals: one paper with five undefined citations counts once."""
+    from .compliance import load_rules
+    from .scoring import LABELS, NAMES, score
+    rules = rules or load_rules()
     rows = papers(con, batch_id)
     tiers = {"fail": 0, "look": 0, "ok": 0}
+    triage = dict.fromkeys(LABELS.values(), 0)
+    subs = {n: 0 for n in NAMES}
+    open_appeals = 0
     by_code: dict[str, dict] = {}
     pages: dict[int, int] = {}
     formats: dict[str, int] = {}
@@ -212,6 +270,11 @@ def health(con, batch_id=None) -> dict:
     for p in rows:
         open_, gone = flags(con, p["id"])
         dismissed += len(gone)
+        sc = score(open_, p["status"], rules)
+        triage[sc["label"]] += 1
+        for n, v in sc["subscores"].items():
+            subs[n] += v
+        open_appeals += sum(a["status"] == "open" for a in appeals(con, p["id"]).values())
         tiers["fail" if any(s["severity"] == "fail" for s in open_) else "look" if open_ else "ok"] += 1
         for s in open_:
             c = by_code.setdefault(s["code"], {"code": s["code"], "papers": 0, "severity": s["severity"],
@@ -223,4 +286,5 @@ def health(con, batch_id=None) -> dict:
         formats[p["format"]] = formats.get(p["format"], 0) + 1
     common = sorted(by_code.values(), key=lambda c: (-c["papers"], -RISK[c["severity"]], c["code"]))
     return {"papers": len(rows), "tiers": tiers, "common": common, "pages": dict(sorted(pages.items())),
-            "formats": formats, "dismissed": dismissed}
+            "formats": formats, "dismissed": dismissed, "triage": triage, "open_appeals": open_appeals,
+            "subscores": {n: round(v / len(rows)) if rows else 100 for n, v in subs.items()}}

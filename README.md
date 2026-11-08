@@ -13,7 +13,7 @@ It recommends; people decide. Design: [docs/DESIGN.md](docs/DESIGN.md).
 
 Keep the black window open while you work; closing it stops the app. Papers are kept between sessions.
 
-**Status:** M1 (intake, format routing, conversion), M2 (format and compliance checks) and M3 (reference verification). The other checks follow the milestones in the design doc.
+**Status:** all milestones in the design doc (M1 to M7) are in: intake and conversion, format and compliance, references, similarity against this conference and past proceedings, quality signals, figure reuse, PDF integrity, scores and triage, appeals and the conference report.
 
 Compliance rules default to an IEEE conference (6 body pages + 2, double-blind). Override any of them with `--rules my_rules.toml`, e.g.
 
@@ -56,6 +56,26 @@ disabled_sources = ["web", "wayback"]   # turns s2 back on
 - `import export.xlsx` reads the submission system's export (EasyChair .xlsx/.csv, HotCRP .json, or any CSV with a paper-number column), sets each paper's title and authors (matched by the number in the file or folder name) and re-checks those papers, so the anonymity check can look for the real author names. `ingest --meta export.xlsx` does both in one go.
 - `check --camera-ready` checks final versions instead: anonymity is off, and it requires an author block that matches the imported author list, a copyright notice, embedded fonts and no review leftovers (line numbers, "anonymous", draft marks).
 - `report` prints a one-screen health summary of the batch: how many papers are clear, worth a look or failing, the most common problems and whether authors can fix them, page counts and formats.
+- `ingest --past old_proceedings.zip` (or the tick box on the Add papers page) stores published papers from earlier years. They are not checked or listed; every submission is compared with them, and text or figures found there give `published_duplicate` / `published_overlap` / `figure_reuse` with the source named. Each paper also gets a `similarity_sources` breakdown.
+- Quoted text (“…” and block quotes) is left out of the similarity check, along with references and acknowledgments.
+- Other checks per paper: tortured phrases ("counterfeit consciousness" for "artificial intelligence"), whether the paper states where its code and data are, ORCID iDs from the author list with a bad check digit, and a PDF integrity report (hidden or white text, hidden instructions aimed at AI reviewers, scripts, embedded files, encryption).
+- Every paper gets a score (100, minus 30 per failed check and 8 per warning), six sub-scores and a recommendation: Ready for review, Needs fixes, Chair check (a problem only a person can judge, such as a duplicate or hidden text) or Desk-reject candidate. The thresholds are yours:
+
+```toml
+[triage]
+review_at = 80      # Ready for review from this score
+reject_below = 40   # Desk-reject candidate below this score
+
+[scope]
+topics = ["wireless networks", "signal processing"]   # flags papers that mention none of them
+
+[quality]
+require_code_statement = true   # warn when a paper says nothing about code or data
+```
+
+- `appeal <paper> <code> --reason "..."` records what the authors say about a flag; `--grant` or `--deny` with `--reason` decides it (a granted appeal dismisses the flag). The paper page has the same buttons.
+- Similarity runs through providers. Only the local one exists and nothing leaves the machine. A provider that would send full text runs only if you name it, one by one, under `[similarity] send_full_text_to`.
+- The **Conference report** page (and `report`) shows the recommendations, average sub-scores, the most common problems and who can fix them, page counts and formats.
 - `export --out screening.csv` writes one row per paper (fails, warnings, dismissed, flags, whether the authors have something to fix) for a spreadsheet.
 
 ## Run

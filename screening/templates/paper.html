@@ -20,6 +20,8 @@
     <div class="ph">
       <h1>{{ {"flags": "Flags", "notice": "Notice draft", "history": "History"}.get(tab, "Flags") }}</h1>
       <div class="meta">
+        {% set tone = {"review": "ok", "fix": "warn", "chair": "chair", "reject": "fail", "wait": "plain"} %}
+        <span class="pill {{ tone[sc.triage] }}" title="Recommendation from the open flags; you decide">{{ sc.label }}, score {{ sc.score }}</span>
         {% if fails %}<span class="pill fail">{{ fails }} required</span>{% endif %}
         {% if warns %}<span class="pill warn">{{ warns }} to check</span>{% endif %}
         {% if not open %}<span class="pill ok">Clear</span>{% endif %}
@@ -42,7 +44,7 @@
       {% if history %}
       <div class="log">
         {% for h in history %}
-        <div><time>{{ h.ts[:16].replace("T", " ") }}</time><b>{{ h.actor }}</b> {{ "dismissed" if h.action == "dismiss" else "restored" if h.action == "restore" else h.action }} {{ label(h.pl.code or "") }}
+        <div><time>{{ h.ts[:16].replace("T", " ") }}</time><b>{{ h.actor }}</b> {{ {"dismiss": "dismissed", "restore": "restored", "appeal_open": "recorded an appeal on", "appeal_granted": "granted the appeal on", "appeal_denied": "denied the appeal on"}.get(h.action, h.action.replace("_", " ")) }} {{ label(h.pl.code or "") }}
           {% if h.pl.reason %}<p>“{{ h.pl.reason }}”</p>{% endif %}</div>
         {% endfor %}
       </div>
@@ -51,13 +53,36 @@
       {% endif %}
 
     {% else %}
+      {% if sc.triage != "wait" %}
+      <div class="subs" aria-label="Sub-scores">
+        {% for name, v in sc.subscores.items() %}
+        <div class="{{ 'low' if v < 60 else 'mid' if v < 100 else '' }}"><span>{{ name }}</span><b>{{ v }}</b><i style="--v: {{ v }}%"></i></div>
+        {% endfor %}
+      </div>
+      {% endif %}
       {% for it in items %}{% set s = it.s %}
       <article class="entry {{ s.severity }}">
-        <div class="eh"><strong>{{ label(s.code) }}</strong><span>{{ s.check_name }}{% if it.page %}, page {{ it.page }}{% endif %}</span></div>
+        <div class="eh"><strong>{{ label(s.code) }}</strong><span>{{ it.cat }}{% if it.page %}, page {{ it.page }}{% endif %}</span></div>
         <div class="eb">
           <p>{{ s.message }}</p>
           {% if it.ev %}<pre>{% for k, v in it.ev %}{{ k }}: <b>{{ v }}</b>{{ "\n" if not loop.last }}{% endfor %}</pre>{% endif %}
           {% if it.hint %}<p class="fix"><strong>{{ "Required fix" if s.severity == "fail" else "Suggestion" }}:</strong> {{ it.hint }}</p>{% endif %}
+          {% set a = it.appeal %}
+          {% if a and a.status == "open" %}
+          <div class="appeal">
+            <strong>The authors appeal</strong>
+            <p>“{{ a.text }}”</p>
+            <small>Recorded by {{ a.by }}, {{ a.at[:10] }}</small>
+            <form class="reason" method="post">
+              <input type="hidden" name="code" value="{{ s.code }}">
+              <input name="reason" required placeholder="Your reason" aria-label="Reason for the decision on the appeal">
+              <button class="btn sm green" formaction="/paper/{{ p.id }}/appeal/grant" title="The authors are right: dismiss the flag">Grant</button>
+              <button class="btn sm" formaction="/paper/{{ p.id }}/appeal/deny" title="Keep the flag">Deny</button>
+            </form>
+          </div>
+          {% elif a %}
+          <p class="note">Appeal {{ a.status }} by {{ a.decided_by }}: {{ a.reason }}</p>
+          {% endif %}
           <div class="acts">
             {% if it.page and has_pdf %}<button class="btn sm" type="button" onclick="goto({{ it.page }})">Go to page {{ it.page }}</button>{% endif %}
             <details class="why">
@@ -68,6 +93,16 @@
                 <button class="btn sm green">Dismiss</button>
               </form>
             </details>
+            {% if not (a and a.status == "open") %}
+            <details class="why">
+              <summary class="btn sm link">Record appeal</summary>
+              <form class="reason" method="post" action="/paper/{{ p.id }}/appeal">
+                <input type="hidden" name="code" value="{{ s.code }}">
+                <input name="text" required placeholder="What do the authors say?" aria-label="The authors' appeal">
+                <button class="btn sm green">Save</button>
+              </form>
+            </details>
+            {% endif %}
           </div>
         </div>
       </article>
@@ -90,6 +125,16 @@
         </details>
       </div>
       {% endfor %}
+      {% endif %}
+
+      {% if checks %}
+      <details class="ran">
+        <summary class="sec">Checks that found nothing wrong ({{ checks|length }})</summary>
+        {% for c in checks %}
+        <div class="okrow"><b>{{ label(c.s.code) }}</b> {{ c.s.message }}
+          {% if c.ev %}<pre>{% for k, v in c.ev %}{{ k }}: {{ v }}{{ "\n" if not loop.last }}{% endfor %}</pre>{% endif %}</div>
+        {% endfor %}
+      </details>
       {% endif %}
     {% endif %}
     </div>
@@ -118,6 +163,6 @@
     {% if next %}if (e.key === "j") location = "/paper/{{ next }}";{% endif %}
     if (e.key === "u") location = "/";
   });
-  document.querySelectorAll("details.why").forEach(d => d.addEventListener("toggle", () => d.open && d.querySelector("input[name=reason]").focus()));
+  document.querySelectorAll("details.why").forEach(d => d.addEventListener("toggle", () => d.open && d.querySelector("input:not([type=hidden])").focus()));
 </script>
 {% endblock %}

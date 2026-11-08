@@ -7,8 +7,11 @@ from pathlib import Path
 from .compliance import run_compliance
 from .convert import convert_paper
 from .db import add_signal, connect, start_run
-from .duplicates import run_duplicates
+from .figures import index_figures, run_figures
+from .integrity import run_integrity
+from .quality import run_quality
 from .references import run_references
+from .similarity import run_similarity
 
 
 def _convert_and_check(db: Path, data: Path, pid: int, rules, convert: bool) -> None:
@@ -16,7 +19,14 @@ def _convert_and_check(db: Path, data: Path, pid: int, rules, convert: bool) -> 
     try:
         if convert and con.execute("SELECT status FROM paper WHERE id=?", (pid,)).fetchone()[0] == "ingested":
             convert_paper(con, pid, data)
+        index_figures(con, pid, data)
+        if _past(con, [pid]):  # published papers are only compared against
+            con.execute("UPDATE paper SET status='checked' WHERE id=? AND status='converted'", (pid,))
+            con.commit()
+            return
         run_compliance(con, pid, data, rules)
+        run_quality(con, pid, rules)
+        run_integrity(con, pid, data)
         if not rules["references"]["online"]:
             run_references(con, pid, data, rules)  # offline it is local parsing, no rate limit to respect
     finally:
@@ -43,7 +53,11 @@ def process(data: Path, ids, rules, jobs=1, convert=True):
                 f.result()  # both steps record their own failures; anything raised here is a real bug
                 _progress(what, n, len(ids))
     _duplicates(db, ids, rules)
-    if not online:
+    con = connect(db)
+    past = _past(con, ids)
+    con.close()
+    ids = [i for i in ids if i not in past]
+    if not online or not ids:
         return
     if ids and not os.environ.get("PAPER_PREFLIGHT_EMAIL"):
         print("note: set PAPER_PREFLIGHT_EMAIL to a contact address; Crossref's polite pool makes lookups"
@@ -55,13 +69,23 @@ def process(data: Path, ids, rules, jobs=1, convert=True):
     con.close()
 
 
+def _past(con, ids) -> set:
+    q = ",".join("?" * len(ids))
+    return {r[0] for r in con.execute(f"SELECT p.id FROM paper p JOIN batch b ON b.id = p.batch_id WHERE"
+                                      f" b.kind = 'past' AND p.id IN ({q})", list(ids))} if ids else set()
+
+
 def _duplicates(db, ids, rules):
-    """Needs every paper's text, so it runs once per batch after the workers."""
+    """Text and figure comparison need every paper, so they run once per batch after the workers. New past
+    proceedings mean every submission is compared again."""
     if not ids:
         return
     con = connect(db)
     try:
-        n = len(run_duplicates(con, ids, rules))
+        if _past(con, ids):
+            from .review import papers
+            ids = [p["id"] for p in papers(con)]
+        n = len(run_similarity(con, ids, rules) | run_figures(con, ids))
         _progress("compared for duplicates", n, n)
     except Exception as e:  # noqa: BLE001  one bad paper must not stop the batch; every paper gets the flag
         error = f"{type(e).__name__}: {str(e)[:500]}"

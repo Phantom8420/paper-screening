@@ -1,7 +1,7 @@
-"""Duplicate and overlapping submissions across every paper in the database.
+"""Duplicate and overlapping submissions across every paper in the database, including past proceedings.
 
-Each paper's text (title, abstract and sections; the reference list is left out, since related papers cite the
-same work) becomes a set of 5-word phrases. An inverted index finds, for each paper, which other papers share
+Each paper's text (title, abstract and sections; the reference list and quoted passages are left out, since
+related papers cite the same work and may quote the same sources) becomes a set of 5-word phrases (shingles). An inverted index finds, for each paper, which other papers share
 its phrases. Phrases found in many papers (template instructions, stock wording) are ignored, so the score is
 "how much of the shorter paper also appears in the other one". Evidence: the score and the shared passages.
 The other paper's id is chair-only information; these flags never go into author notices.
@@ -12,12 +12,13 @@ from collections import Counter, defaultdict
 
 from .db import add_signal, audit, start_run
 
-VERSION = "2"
+VERSION = "3"
 N = 5  # words per phrase: long enough that chance matches between unrelated papers are rare
 COMMON = 10  # a phrase in more papers than this is boilerplate, not copying
 MIN_PHRASES = 200  # about 200 words; a title and abstract alone must not "match" a full paper
 COMPARABLE = 0.5  # a fail needs the shorter text to be at least half the longer; otherwise it is a warn
 WORD = re.compile(r"[^\W_]+")
+QUOTED = re.compile(r"[“\"][^“”\"]{1,600}[”\"]")  # quotation marks pandoc keeps; an unclosed mark removes nothing
 NOT_BODY = re.compile(r"^\W*(?:[ivxlc]+\.|\d+\.?)?\s*(?:references?|bibliography|acknowledge?ments?)\W*$", re.I)
 
 
@@ -25,7 +26,7 @@ def words(struct: dict) -> list[str]:
     parts = [struct.get("title") or "", struct.get("abstract") or ""]
     parts += [s.get("text") or "" for s in (struct.get("sections") or [])
               if isinstance(s, dict) and not NOT_BODY.match(s.get("heading") or "")]
-    return WORD.findall(" ".join(p for p in parts if isinstance(p, str)).lower())
+    return WORD.findall(QUOTED.sub(" ", " ".join(p for p in parts if isinstance(p, str))).lower())
 
 
 def phrases(ws: list[str]) -> list[int]:
@@ -56,7 +57,7 @@ def _words_of(row) -> list[str] | None:
 def _load(con) -> tuple[dict, dict]:
     """(rows by id, phrase set by id). Only the sets stay in memory; text is rebuilt for matches only."""
     rows, sets = {}, {}
-    for r in con.execute("SELECT p.id, p.external_id, p.sections_json, b.name AS batch FROM paper p"
+    for r in con.execute("SELECT p.id, p.external_id, p.sections_json, b.name AS batch, b.kind FROM paper p"
                          " JOIN batch b ON b.id = p.batch_id WHERE p.sections_json IS NOT NULL"):
         if (ws := _words_of(r)) is not None:
             rows[r["id"]], sets[r["id"]] = r, frozenset(phrases(ws))
@@ -92,39 +93,61 @@ def find_matches(rows, sets, index, ids, warn: float) -> dict:
     return out
 
 
+def _source(row) -> str:
+    return f"past proceedings: {row['batch']}" if row["kind"] == "past" else "this conference"
+
+
+def _signal(con, run, hits, past: bool, mine, rows, sets, index, ws, seq, fail):
+    items = [{"paper_id": o, "external_id": rows[o]["external_id"], "batch": rows[o]["batch"], "source": _source(rows[o]),
+              "overlap": ov, "shared_passages": _passages(ws, seq, (sets[o] & mine) & index.keys())}
+             for o, ov in hits[:10]]
+    top, other = hits[0][1], hits[0][0]
+    comparable = min(len(mine), len(sets[other])) >= COMPARABLE * max(len(mine), len(sets[other]))
+    what = f"published paper {rows[other]['external_id'] or other} ({rows[other]['batch']})" if past else f"paper {other}"
+    if top >= fail and comparable:
+        code, sev, msg = ("published_duplicate" if past else "duplicate_submission"), "fail", (
+            f"{top:.0%} of the text matches {what}: " + ("likely already published." if past else
+                                                         "likely the same paper submitted twice."))
+    else:
+        note = "" if comparable else " (one text is much shorter: possibly a part or an extraction gap)"
+        code, sev, msg = ("published_overlap" if past else "overlapping_submission"), "warn", (
+            f"{top:.0%} of the shorter text matches {what}{note}: check for " + ("reused text." if past else
+                                                                                "duplicated work."))
+    add_signal(con, run, code, sev, msg, {"matches": items}, score=top)
+
+
 def run_duplicates(con, paper_ids, rules) -> set:
-    """Compare papers against the whole database and store one run for each of `paper_ids` and every paper
-    they match (an older paper learns about its new twin too). Returns the ids that got a new run."""
+    """Compare papers against the whole database and store one run for each of `paper_ids` and every
+    submission they match (an older paper learns about its new twin too). Past-proceedings papers are only
+    compared against: they get no runs. Returns the ids that got a new run."""
     warn, fail = rules["duplicates"]["warn_overlap"], rules["duplicates"]["fail_overlap"]
     rows, sets = _load(con)
     index = _index(sets)
+    paper_ids = [p for p in paper_ids if p not in rows or rows[p]["kind"] != "past"]
     matches = find_matches(rows, sets, index, paper_ids, warn)
-    partners = {o for hits in matches.values() for o, _ in hits} - set(paper_ids)
+    partners = {o for hits in matches.values() for o, _ in hits if rows[o]["kind"] != "past"} - set(paper_ids)
     matches |= find_matches(rows, sets, index, partners, warn)
     for pid in sorted(set(paper_ids) | partners):
         run = start_run(con, pid, "duplicates", VERSION, rules["duplicates"])
         mine = sets.get(pid)
+        hits = matches.get(pid) or []
         if mine is None or len(mine) < MIN_PHRASES:
             add_signal(con, run, "duplicates_unchecked", "info", "Too little text to compare with other papers.")
-        elif hits := matches.get(pid):
+        elif hits:
             ws = words(json.loads(rows[pid]["sections_json"]))
             seq = phrases(ws)
-            items = [{"paper_id": o, "external_id": rows[o]["external_id"], "batch": rows[o]["batch"],
-                      "overlap": ov, "shared_passages": _passages(ws, seq, (sets[o] & mine) & index.keys())}
-                     for o, ov in hits[:10]]
-            top, other = hits[0][1], hits[0][0]
-            comparable = min(len(mine), len(sets[other])) >= COMPARABLE * max(len(mine), len(sets[other]))
-            if top >= fail and comparable:
-                add_signal(con, run, "duplicate_submission", "fail",
-                           f"{top:.0%} of the text matches paper {other}: likely the same paper submitted twice.",
-                           {"matches": items}, score=top)
-            else:
-                note = "" if comparable else " (one text is much shorter: possibly a part or an extraction gap)"
-                add_signal(con, run, "overlapping_submission", "warn",
-                           f"{top:.0%} of the shorter text matches paper {other}{note}: check for duplicated work.",
-                           {"matches": items}, score=top)
-        else:
+            for past in (False, True):  # one flag per source, so a chair sees "also published before" on its own
+                if group := [h for h in hits if (rows[h[0]]["kind"] == "past") == past]:
+                    _signal(con, run, group, past, mine, rows, sets, index, ws, seq, fail)
+        by_source = Counter(_source(rows[o]) for o, _ in hits)
+        n_past = sum(r["kind"] == "past" for r in rows.values())
+        add_signal(con, run, "similarity_sources", "info",
+                   f"Compared with {len(sets) - 1 - n_past} submission(s) and {n_past} past-proceedings paper(s).",
+                   {"sources": [{"source": k, "matching_papers": v, "highest_overlap": max(ov for o, ov in hits
+                                                                                             if _source(rows[o]) == k)}
+                                for k, v in sorted(by_source.items())]})
+        if not hits and mine is not None and len(mine) >= MIN_PHRASES:
             add_signal(con, run, "duplicates_ok", "info", f"No overlap with the other {len(sets) - 1} paper(s).")
-        audit(con, "system", "duplicates", "paper", pid, {"matches": [o for o, _ in matches.get(pid, [])]})
+        audit(con, "system", "duplicates", "paper", pid, {"matches": [o for o, _ in hits]})
     con.commit()
     return set(paper_ids) | partners

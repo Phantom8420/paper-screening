@@ -1,4 +1,5 @@
-"""CLI: python -m screening ingest | import | check | status | report | dismiss | restore | notices | export  (-h on each)"""
+"""CLI: python -m screening ingest | import | check | status | report | dismiss | restore | appeal | notices | export
+| serve  (-h on each)"""
 import argparse
 import getpass
 import os
@@ -13,7 +14,9 @@ from .intake import ingest
 from .pipeline import process
 from .review import (
     FIX_HINTS,
+    appeal,
     changes,
+    decide_appeal,
     dismiss,
     export_csv,
     flags,
@@ -35,6 +38,8 @@ def main(argv=None):
     p.add_argument("--rules", type=Path, help="TOML file overriding the default IEEE rules")
     p.add_argument("--no-convert", action="store_true")
     p.add_argument("--meta", type=Path, help="EasyChair/HotCRP export (.xlsx, .csv or .json) with titles and authors")
+    p.add_argument("--past", action="store_true",
+                   help="these are already published papers (earlier proceedings): compare submissions against them only")
     m = sub.add_parser("import", help="attach titles and authors from an EasyChair/HotCRP export, then re-check")
     m.add_argument("export", type=Path)
     m.add_argument("--batch", type=int)
@@ -60,12 +65,21 @@ def main(argv=None):
         d.add_argument("code", help="flag code as shown by status, e.g. self_reference")
         d.add_argument("--reason", required=True)
         d.add_argument("--by", default=getpass.getuser(), help="who decided (default: login name)")
+    a = sub.add_parser("appeal", help="record an author's appeal against a flag, or grant/deny it")
+    a.add_argument("paper", type=int)
+    a.add_argument("code")
+    a.add_argument("--reason", required=True, help="the authors' argument, or why you grant or deny it")
+    g = a.add_mutually_exclusive_group()
+    g.add_argument("--grant", action="store_true", help="the authors are right: dismiss the flag")
+    g.add_argument("--deny", action="store_true", help="keep the flag")
+    a.add_argument("--by", default=getpass.getuser())
     n = sub.add_parser("notices", help="write a fix-request draft for each paper whose authors have something to fix")
     n.add_argument("--batch", type=int)
     n.add_argument("--out", type=Path, help="folder (default: <data>/notices)")
     n.add_argument("--force", action="store_true", help="replace drafts that already exist")
     r = sub.add_parser("report", help="conference health: how many papers are clear and the most common problems")
     r.add_argument("--batch", type=int)
+    r.add_argument("--rules", type=Path, help="for the triage thresholds")
     e = sub.add_parser("export", help="one CSV row per paper, for a spreadsheet or the submission system")
     e.add_argument("--batch", type=int)
     e.add_argument("--out", type=Path, default=Path("screening.csv"))
@@ -99,12 +113,15 @@ def main(argv=None):
         rules = _rules(args)
         if args.meta and not args.meta.is_file():
             ap.error(f"not found: {args.meta}")
-        batch_id, ids = ingest(con, args.paths, data, args.name)
+        batch_id, ids = ingest(con, args.paths, data, args.name, kind="past" if args.past else "submissions")
         if args.meta:
             _report_import(import_export(con, args.meta, batch_id))
         if not args.no_convert:
             process(data, ids, rules, args.jobs, convert=True)
-        show_status(con, batch_id)
+        if args.past:
+            print(f"{len(ids)} past-proceedings paper(s) stored; submissions are compared against them")
+        else:
+            show_status(con, batch_id)
     elif args.cmd == "check":
         rules = _rules(args)
         ids = [r["id"] for r in papers(con, args.batch)]
@@ -130,6 +147,16 @@ def main(argv=None):
         except ValueError as err:
             sys.exit(f"error: {err}")
         print(f"paper {args.paper}: {args.code} {args.cmd}ed by {args.by}")
+    elif args.cmd == "appeal":
+        try:
+            if args.grant or args.deny:
+                decide_appeal(con, args.paper, args.code, args.grant, args.reason, args.by)
+            else:
+                appeal(con, args.paper, args.code, args.reason, args.by)
+        except ValueError as err:
+            sys.exit(f"error: {err}")
+        print(f"paper {args.paper}: appeal on {args.code} " + ("granted, flag dismissed" if args.grant else
+                                                            "denied, flag kept" if args.deny else "recorded"))
     elif args.cmd == "notices":
         out = args.out or data / "notices"
         out.mkdir(parents=True, exist_ok=True)
@@ -146,10 +173,13 @@ def main(argv=None):
         print(f"{written} notice draft(s) in {out} (nothing was sent)"
               + (f"; {kept} existing draft(s) kept, --force to replace" if kept else ""))
     elif args.cmd == "report":
-        h = health(con, args.batch)
+        h = health(con, args.batch, load_rules(args.rules))
         t = h["tiers"]
         print(f"{h['papers']} paper(s): {t['ok']} clear, {t['look']} worth a look, {t['fail']} failed a check;"
               f" {h['dismissed']} flag(s) dismissed by chairs")
+        print("triage:  " + ", ".join(f"{k} {v}" for k, v in h["triage"].items() if v)
+              + (f"; {h['open_appeals']} open appeal(s)" if h["open_appeals"] else ""))
+        print("average sub-scores: " + ", ".join(f"{k} {v}" for k, v in h["subscores"].items()))
         print("formats: " + ", ".join(f"{k} {v}" for k, v in h["formats"].items()))
         print("pages:   " + ", ".join(f"{k}p x{v}" for k, v in h["pages"].items()))
         print("most common problems (papers affected):")

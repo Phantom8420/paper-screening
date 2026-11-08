@@ -44,6 +44,9 @@ CREATE TABLE IF NOT EXISTS app_user(
 CREATE TABLE IF NOT EXISTS audit_log(
   id INTEGER PRIMARY KEY, ts TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL,
   entity TEXT, entity_id INTEGER, payload_json TEXT);
+CREATE TABLE IF NOT EXISTS figure_hash(
+  paper_id INTEGER NOT NULL REFERENCES paper(id), page INTEGER NOT NULL, hash INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_figure_paper ON figure_hash(paper_id);
 CREATE INDEX IF NOT EXISTS ix_paper_batch ON paper(batch_id);
 CREATE INDEX IF NOT EXISTS ix_signal_paper ON signal(paper_id);
 CREATE INDEX IF NOT EXISTS ix_signal_run ON signal(run_id);
@@ -68,6 +71,12 @@ def connect(path: str | Path) -> sqlite3.Connection:
     con.execute("PRAGMA foreign_keys=ON")
     con.execute("PRAGMA journal_mode=WAL")
     con.executescript(SCHEMA)
+    if "kind" not in {r[1] for r in con.execute("PRAGMA table_info(batch)")}:  # databases made before past proceedings
+        try:
+            con.execute("ALTER TABLE batch ADD COLUMN kind TEXT NOT NULL DEFAULT 'submissions'")
+            con.commit()
+        except sqlite3.OperationalError:  # another worker added it first
+            pass
     return con
 
 

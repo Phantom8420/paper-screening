@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Conference report · Screening{% endblock %}
+{% block barclass %}light{% endblock %}
+{% block body %}
+{% set tone = {"Ready for review": "ok", "Needs fixes": "warn", "Chair check": "chair", "Desk-reject candidate": "fail", "Being checked": "plain"} %}
+<div class="dash">
+  <nav class="nav" aria-label="Papers">
+    <a class="side" href="/">Back to papers</a>
+    <a class="side" href="/export.csv">Download results (CSV)</a>
+    <p class="foot">Recommendations only. Labels follow the open flags and change when you dismiss one or grant an appeal.</p>
+  </nav>
+  <main class="list rep">
+    <h1>Conference report</h1>
+    {% if not h.papers %}
+    <div class="empty"><strong>No papers yet</strong><p><a class="btn green" href="/add">Add papers</a></p></div>
+    {% else %}
+    <p class="lead">{{ h.papers }} submission(s){% if past %}, compared with {{ past }} published paper(s) from earlier years{% endif %}.
+      {{ h.dismissed }} flag(s) dismissed by chairs{% if h.open_appeals %}, <a href="/?show=appeals">{{ h.open_appeals }} appeal(s) waiting for a decision</a>{% endif %}.</p>
+
+    <section class="block">
+      <h2>Recommendations</h2>
+      <div class="stack" role="img" aria-label="{% for k, v in h.triage.items() if v %}{{ k }} {{ v }}{{ ', ' if not loop.last }}{% endfor %}">
+        {% for k, v in h.triage.items() if v %}<span class="{{ tone[k] }}" style="flex: {{ v }}"></span>{% endfor %}
+      </div>
+      <ul class="legend">
+        {% for k, v in h.triage.items() if v %}<li><i class="{{ tone[k] }}"></i>{{ k }} <b>{{ v }}</b></li>{% endfor %}
+      </ul>
+      <p class="note">Score 100, minus 30 per failed check and 8 per warning. Ready for review from {{ rules.triage.review_at }}, desk-reject candidate below {{ rules.triage.reject_below }}; set both under [triage] in the rules file. Problems only a person can judge (duplicates, hidden text) go to Chair check.</p>
+    </section>
+
+    <section class="block">
+      <h2>Average sub-scores</h2>
+      <div class="subs wide">
+        {% for name, v in h.subscores.items() %}
+        <div class="{{ 'low' if v < 60 else 'mid' if v < 100 else '' }}"><span>{{ name }}</span><b>{{ v }}</b><i style="--v: {{ v }}%"></i></div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="block">
+      <h2>Most common problems</h2>
+      {% if h.common %}
+      {% set top = h.common[0].papers %}
+      <table class="bars">
+        <thead><tr><th>Problem</th><th>Papers</th><th class="hide-sm">Who fixes it</th></tr></thead>
+        <tbody>
+        {% for c in h.common[:15] %}
+        <tr><td>{{ label(c.code) }}</td>
+          <td class="n"><span class="bar-row"><i class="{{ c.severity }}" style="width: {{ (c.papers / top * 100)|round }}%"></i><b>{{ c.papers }}</b></span></td>
+          <td class="hide-sm">{{ "Authors" if c.authors_can_fix else "Chairs" }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="note">No open flags.</p>
+      {% endif %}
+    </section>
+
+    <section class="block two">
+      <div>
+        <h2>Page counts</h2>
+        <table class="bars">
+          <tbody>
+          {% set most = h.pages.values()|max if h.pages else 1 %}
+          {% for n, k in h.pages.items() %}
+          <tr><td class="n">{{ n }} page{{ "s" if n != 1 }}</td><td><span class="bar-row"><i class="plain" style="width: {{ (k / most * 100)|round }}%"></i><b>{{ k }}</b></span></td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <h2>Formats</h2>
+        <table class="bars">
+          <tbody>
+          {% for f, k in h.formats.items() %}
+          <tr><td>{{ {"latex": "LaTeX", "word": "Word"}.get(f, "Unknown") }}</td><td class="n">{{ k }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+  </main>
+</div>
+{% endblock %}
