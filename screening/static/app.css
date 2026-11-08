@@ -272,4 +272,4 @@ table.bars td { padding: 7px 12px; }
 
 /* public demo */
 .bar .pill.demo { margin-right: 12px; color: var(--bar-ink); background: var(--bar-hover); border-color: transparent; }
-.demo-note { padding: 12px 16px; border-left: 3px solid var(--link); background: #F1F5FB; margin: 0 0 16px; }
+.demo-note { padding: 12px 16px; border: 1px solid #D6E0EE; border-radius: 6px; background: #F1F5FB; margin: 0 0 16px; }
